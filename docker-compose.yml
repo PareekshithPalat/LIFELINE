@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  lifeline-edge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: lifeline-edge
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - LIFELINE_NODE_ID=edge_node_alpha
+      - QDRANT_STORAGE_PATH=/app/data/qdrant_storage
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media

@@ -1,0 +1,46 @@
+{
+  "user_id": "primary_user",
+  "full_name": "John Alexander Doe",
+  "dob": "1988-04-12",
+  "blood_group": "O-",
+  "allergies": [
+    "Penicillin",
+    "Aspirin",
+    "NSAIDs (Ibuprofen, Naproxen)",
+    "Peanuts"
+  ],
+  "current_medications": [
+    "Albuterol HFA Inhaler 90mcg (1-2 puffs PRN for wheezing)",
+    "Omeprazole 20mg capsule once daily"
+  ],
+  "chronic_conditions": [
+    "Mild Intermittent Asthma",
+    "History of Peptic Ulcer with Upper GI Bleeding",
+    "Seasonal Rhinitis"
+  ],
+  "emergency_contacts": [
+    {
+      "name": "Jane Doe",
+      "relationship": "Spouse",
+      "phone": "+1-555-019-2831",
+      "priority": 1
+    },
+    {
+      "name": "Dr. Robert Hayes",
+      "relationship": "Primary Physician / Cardiologist",
+      "phone": "+1-555-019-8822",
+      "priority": 2
+    },
+    {
+      "name": "David Doe",
+      "relationship": "Brother",
+      "phone": "+1-555-019-4490",
+      "priority": 3
+    }
+  ],
+  "medical_notes": "Patient carries an active rescue inhaler. Crucial allergy to Aspirin and NSAIDs; causes severe facial angioedema and bronchospasm. Avoid all non-steroidal anti-inflammatory drugs.",
+  "ice_instructions": "DO NOT ADMINISTER ASPIRIN OR IBUPROFEN. If wheezing or in respiratory distress, use Albuterol. Blood donor type O-negative.",
+  "last_updated": "2026-09-30T12:00:00Z",
+  "version": 1,
+  "synced": true
+}

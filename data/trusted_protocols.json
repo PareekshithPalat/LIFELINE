@@ -1,0 +1,134 @@
+[
+  {
+    "id": "cpr-adult-01",
+    "tier": "TRUSTED",
+    "title": "Adult Cardiopulmonary Resuscitation (CPR) & AED Protocol",
+    "content": "Step 1: Check responsiveness. Tap shoulders and shout 'Are you okay?'. Check for normal breathing for no more than 10 seconds.\nStep 2: If unresponsive and not breathing or only gasping, immediately call emergency services (911/112) and retrieve an Automated External Defibrillator (AED).\nStep 3: Begin chest compressions. Place heel of one hand in the center of the chest, interlock other hand on top. Push hard and fast at a rate of 100-120 compressions per minute at a depth of 2 to 2.4 inches (5-6 cm).\nStep 4: Allow full chest recoil between compressions. Minimize interruptions to less than 10 seconds.\nStep 5: If trained, deliver 2 rescue breaths after every 30 compressions (30:2 ratio). If untrained, perform continuous Hands-Only CPR.\nStep 6: As soon as AED arrives, turn it on, apply pads to bare chest according to voice prompts, and follow automated shock analysis instructions.",
+    "tags": ["cpr", "cardiac arrest", "unconscious", "not breathing", "aed", "heart attack", "compressions"],
+    "risk_level": "CRITICAL",
+    "contraindications": ["Do not perform chest compressions on a person who is conscious and breathing normally.", "Do not touch the patient while the AED is analyzing or delivering a shock."],
+    "author": "American Heart Association / ERC Guidelines",
+    "version": 1
+  },
+  {
+    "id": "cpr-pediatric-01",
+    "tier": "TRUSTED",
+    "title": "Child & Infant CPR Protocol (Ages 1 to Puberty / Under 1 Year)",
+    "content": "Step 1: Check responsiveness and breathing. Tap foot (infant) or shoulder (child).\nStep 2: If alone with no mobile phone, perform 2 minutes (5 cycles of 30:2) of CPR before leaving to call emergency services.\nStep 3: Compressions for child: Use 1 or 2 hands to compress chest about 2 inches (5 cm). For infant: Use 2 fingers or two-thumb encircling technique to compress about 1.5 inches (4 cm).\nStep 4: Rate: 100-120 compressions per minute.\nStep 5: Give 2 gentle rescue breaths after every 30 compressions (or 15:2 if two trained rescuers). For infants, cover both mouth and nose with your mouth.\nStep 6: Use pediatric AED pads with attenuator if available. If not, use standard adult pads ensuring pads do not touch each other.",
+    "tags": ["pediatric cpr", "child cpr", "infant cpr", "baby cpr", "resuscitation"],
+    "risk_level": "CRITICAL",
+    "contraindications": ["Do not use excessive force or adult breath volume on infants.", "Ensure AED pads do not overlap or touch each other."],
+    "author": "Pediatric Advanced Life Support Guidelines",
+    "version": 1
+  },
+  {
+    "id": "severe-bleeding-tourniquet-01",
+    "tier": "TRUSTED",
+    "title": "Severe Hemorrhage & Arterial Bleeding Control",
+    "content": "Step 1: Ensure scene safety and don gloves if available. Expose the wound to locate exact source of bleeding.\nStep 2: Apply immediate direct, firm pressure with a clean cloth or hemostatic dressing directly onto the bleeding site.\nStep 3: If bleeding is arterial (pulsing, spurting, bright red) or limb wound continues to bleed heavily despite direct pressure, apply a commercial windlass tourniquet immediately.\nStep 4: Position tourniquet 2 to 3 inches above the bleeding site (never directly over a joint). If the bleeding site is near a joint, place tourniquet above the joint proximal to the torso.\nStep 5: Tighten the windlass rod until bright red bleeding stops and distal pulse is absent. Lock the windlass in place.\nStep 6: Mark the exact time of application (e.g. 'T: 14:30') visibly on the patient's forehead or tourniquet strap.\nStep 7: Keep patient warm to prevent hypothermic coagulopathy.",
+    "tags": ["severe bleeding", "hemorrhage", "arterial bleeding", "tourniquet", "wound", "trauma", "shock"],
+    "risk_level": "CRITICAL",
+    "contraindications": ["DO NOT loosen or remove a tourniquet once applied; only qualified surgical personnel should remove it.", "DO NOT apply tourniquet directly over a joint (elbow, knee).", "DO NOT use narrow wire or shoelaces that can cut through tissue."],
+    "author": "Stop The Bleed / Tactical Combat Casualty Care",
+    "version": 1
+  },
+  {
+    "id": "anaphylaxis-epipen-01",
+    "tier": "TRUSTED",
+    "title": "Anaphylaxis Emergency & Epinephrine Auto-Injector Administration",
+    "content": "Step 1: Recognize signs of anaphylaxis: Difficulty breathing, wheezing, swelling of face/lips/tongue, hives, throat tightness, dizziness, vomiting after allergen exposure.\nStep 2: Administer Epinephrine Auto-Injector (EpiPen / Auvi-Q) without delay. Dose: 0.3mg for adults (>30kg), 0.15mg for children (15-30kg).\nStep 3: Remove safety cap. Form fist around injector. Place orange/active tip firmly against middle of outer thigh (anterolateral aspect) at a 90-degree angle. Can be given through clothing if necessary.\nStep 4: Push down firmly until click is heard/felt. Hold firmly against thigh for 3 full seconds.\nStep 5: Remove injector and massage the injection site for 10 seconds.\nStep 6: Call emergency medical services (911/112). Lay patient flat on back with feet elevated. If vomiting or struggling to breathe, allow sitting position.\nStep 7: If symptoms do not improve within 5 to 15 minutes, administer a second epinephrine auto-injector in opposite thigh.",
+    "tags": ["anaphylaxis", "epipen", "epinephrine", "severe allergy", "allergic reaction", "swelling", "hives", "wheezing"],
+    "risk_level": "CRITICAL",
+    "contraindications": ["DO NOT delay epinephrine; antihistamines (Benadryl) are NOT sufficient for airway swelling or anaphylaxis.", "DO NOT inject epinephrine into fingers, hands, feet, or buttocks."],
+    "author": "World Allergy Organization / Resuscitation Council",
+    "version": 1
+  },
+  {
+    "id": "acute-asthma-attack-01",
+    "tier": "TRUSTED",
+    "title": "Acute Severe Asthma Exacerbation Management",
+    "content": "Step 1: Help the person sit upright comfortably. Loosen tight clothing. Reassure them and encourage slow, calm breathing.\nStep 2: Locate their fast-acting reliever inhaler (usually Blue, e.g., Albuterol / Salbutamol) and spacer if available.\nStep 3: Shake inhaler well. Administer 1 puff into spacer, instruct patient to take 4 slow deep breaths. Repeat for a total of 4 puffs (wait 1 minute between puffs).\nStep 4: Wait 4 minutes. If there is no marked improvement or speech remains fragmented, give another 4 puffs.\nStep 5: If the person is still struggling to breathe, exhausted, turning blue around lips (cyanosis), or unable to speak sentences, call 911/112 immediately.\nStep 6: Continue giving 4 puffs every 4 minutes until emergency medical services arrive.",
+    "tags": ["asthma", "inhaler", "albuterol", "salbutamol", "bronchospasm", "wheezing", "shortness of breath"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT force the patient to lie down flat, as this severely restricts lung volume.", "DO NOT give cold drinks during an acute asthma attack."],
+    "author": "Global Initiative for Asthma (GINA)",
+    "version": 1
+  },
+  {
+    "id": "choking-adult-child-01",
+    "tier": "TRUSTED",
+    "title": "Choking (Foreign Body Airway Obstruction) - Adult & Child (>1 year)",
+    "content": "Step 1: Determine severity. If person can cough loudly or speak, encourage them to keep coughing. Do not intervene yet.\nStep 2: If person cannot speak, makes high-pitched sounds, clutches throat, or turns blue, ask 'Are you choking?'.\nStep 3: Deliver 5 back blows: Lean person slightly forward, support upper chest with one hand, deliver 5 firm blows between shoulder blades with the heel of your other hand.\nStep 4: If obstruction persists, perform 5 abdominal thrusts (Heimlich Maneuver): Stand behind person, wrap arms around waist. Place thumb side of fist just above navel, well below ribs. Grasp fist with other hand and give quick upward, inward thrusts.\nStep 5: Alternate between 5 back blows and 5 abdominal thrusts until object is expelled.\nStep 6: If person becomes unconscious, lower them gently to ground, call 911, and immediately start CPR compressions. Before giving rescue breaths, look in mouth and remove object ONLY if clearly visible.",
+    "tags": ["choking", "heimlich", "airway obstruction", "suffocation", "foreign object"],
+    "risk_level": "CRITICAL",
+    "contraindications": ["DO NOT perform blind finger sweeps in the mouth; this can push the foreign object deeper.", "DO NOT perform abdominal thrusts on infants under 1 year (use back slaps and chest thrusts instead) or heavily pregnant women (use chest thrusts)."],
+    "author": "Red Cross / ERC Guidelines",
+    "version": 1
+  },
+  {
+    "id": "burns-thermal-chemical-01",
+    "tier": "TRUSTED",
+    "title": "Burns Management: Thermal, Chemical, and Scalding",
+    "content": "Step 1: Stop the burning process immediately. Remove heat source. For electrical burns, ensure power is turned off before touching patient.\nStep 2: Cool the burn: Immediately hold burned area under cool or lukewarm running tap water for a full 20 minutes. Do this as soon as possible within 3 hours of injury.\nStep 3: Remove jewelry, rings, belts, and tight clothing from the burned limb before swelling begins. Do NOT peel away clothing melted onto burned skin.\nStep 4: Cover the burn loosely with clean plastic cling film (kitchen wrap) or a clean, sterile non-adherent dressing. Plastic film protects nerve endings and prevents moisture loss.\nStep 5: Keep the patient warm with blankets over unaffected areas to prevent hypothermia.\nStep 6: Seek emergency care immediately if burn is larger than patient's palm, on face/hands/joints/groin, causes white or charred skin (3rd degree), or caused by chemicals/electricity.",
+    "tags": ["burns", "thermal burn", "chemical burn", "scald", "fire", "dressing"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT apply ice, ice water, or freezing compresses, which cause deep tissue frostbite injury.", "DO NOT apply butter, grease, toothpaste, oils, or home ointments to burns.", "DO NOT pop or puncture burn blisters."],
+    "author": "International Society for Burn Injuries (ISBI)",
+    "version": 1
+  },
+  {
+    "id": "seizure-convulsion-01",
+    "tier": "TRUSTED",
+    "title": "Seizure & Generalized Tonic-Clonic Convulsion First Aid",
+    "content": "Step 1: Protect the person from injury: Clear sharp, hard, or hot objects from around them. Cushion their head with something soft (folded jacket).\nStep 2: Time the seizure: Note the exact start time. If seizure lasts longer than 5 minutes, call 911/112 immediately (Status Epilepticus).\nStep 3: Loosen tight clothing around neck (ties, tight collars).\nStep 4: Do not restrain movements or hold the person down.\nStep 5: After jerking stops and person is unresponsive: Gently roll them onto their side into the Recovery Position to keep airway clear of saliva or vomit.\nStep 6: Stay with them until they are fully awake, oriented, and breathing normally.",
+    "tags": ["seizure", "convulsion", "epilepsy", "tonic clonic", "recovery position"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT put anything in the person's mouth (no fingers, spoons, or bite blocks); they cannot swallow their tongue and teeth can break.", "DO NOT give food, drink, or oral medication until person is fully conscious and alert."],
+    "author": "Epilepsy Foundation Clinical Advisory",
+    "version": 1
+  },
+  {
+    "id": "stroke-fast-protocol-01",
+    "tier": "TRUSTED",
+    "title": "Acute Stroke Assessment (FAST Protocol)",
+    "content": "Step 1: Check FACE: Ask the person to smile. Does one side of the face droop or feel numb?\nStep 2: Check ARMS: Ask the person to raise both arms. Does one arm drift downward or feel weak?\nStep 3: Check SPEECH: Ask the person to repeat a simple sentence (e.g., 'The grass is green'). Is their speech slurred, strange, or are they unable to speak?\nStep 4: TIME to call emergency services: If person shows ANY ONE of these symptoms, call 911/112 immediately. Note the exact time symptoms first appeared.\nStep 5: Keep person lying flat or with head slightly elevated (30 degrees). Reassure them.\nStep 6: Do not give anything to eat or drink due to impaired swallowing reflexes.",
+    "tags": ["stroke", "fast protocol", "cerebrovascular", "facial droop", "slurred speech", "weakness"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT give Aspirin or blood thinners until brain CT scan rules out hemorrhagic stroke.", "DO NOT give oral fluids or food; aspiration risk is high."],
+    "author": "American Stroke Association",
+    "version": 1
+  },
+  {
+    "id": "suspected-heart-attack-aspirin-01",
+    "tier": "TRUSTED",
+    "title": "Suspected Acute Myocardial Infarction (Heart Attack) & Aspirin Guidance",
+    "content": "Step 1: Recognize warning signs: Crushing chest pain or pressure, discomfort radiating to left arm/jaw/neck/back, shortness of breath, cold sweat, nausea.\nStep 2: Call emergency services (911/112) immediately. State 'Suspected Heart Attack'.\nStep 3: Have the person sit down, rest, and try to stay calm in a semi-sitting position with knees bent.\nStep 4: Aspirin Administration Protocol: If the adult is conscious, NOT allergic to aspirin, has NO history of severe gastrointestinal bleeding, and has NOT been told by a doctor to avoid aspirin: Provide one 325mg non-coated adult aspirin or 2-4 low-dose 81mg chewable aspirins. Instruct them to chew thoroughly before swallowing for rapid platelet inhibition.\nStep 5: If patient has prescribed Nitroglycerin, assist them in taking their dose if systolic BP is adequate.\nStep 6: Be prepared to initiate CPR and use an AED if patient becomes unresponsive.",
+    "tags": ["heart attack", "myocardial infarction", "chest pain", "aspirin", "nitroglycerin", "cardiac"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT administer Aspirin if patient is allergic to Aspirin/NSAIDs or has active internal bleeding or bleeding peptic ulcer.", "DO NOT let the patient walk or exert themselves.", "DO NOT give Aspirin to children or adolescents (risk of Reye syndrome)."],
+    "author": "American College of Cardiology / AHA Guidelines",
+    "version": 1
+  },
+  {
+    "id": "poisoning-ingestion-chemical-01",
+    "tier": "TRUSTED",
+    "title": "Poisoning & Toxic Substance Ingestion Protocol",
+    "content": "Step 1: Check scene safety: Avoid inhaling toxic fumes or touching corrosive liquids.\nStep 2: Call Poison Control Center (1-800-222-1222 in US) or local emergency services immediately.\nStep 3: If person is conscious: Try to find out what was taken, how much, and when. Keep the container, label, or pill bottle for medical personnel.\nStep 4: Inhaled poison: Move person into fresh air immediately.\nStep 5: Poison on skin or eyes: Flush skin or open eyes with large amounts of clean running water for at least 15 to 20 minutes.\nStep 6: If person becomes unconscious or stops breathing, begin CPR and use face shield during breaths.",
+    "tags": ["poison", "toxic", "overdose", "ingestion", "chemical", "poison control"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT induce vomiting unless specifically instructed by Poison Control or a physician, especially for caustic acids, alkalis, or petroleum products which burn esophagus twice.", "DO NOT administer Ipecac syrup, raw eggs, or salt water."],
+    "author": "American Association of Poison Control Centers",
+    "version": 1
+  },
+  {
+    "id": "diabetic-hypoglycemia-01",
+    "tier": "TRUSTED",
+    "title": "Diabetic Hypoglycemia (Severe Low Blood Sugar)",
+    "content": "Step 1: Recognize symptoms: Shakiness, sweating, confusion, pale skin, dizziness, irritability, hunger, rapid heartbeat.\nStep 2: If person is CONSCIOUS and able to swallow safely: Follow the 'Rule of 15'. Provide 15 grams of fast-acting carbohydrate: 4 ounces (1/2 cup) fruit juice or regular soda, 3-4 glucose tablets, or 1 tablespoon honey/sugar.\nStep 3: Wait 15 minutes and re-check blood glucose or assess symptoms. If still low or symptomatic, repeat with another 15g carbs.\nStep 4: Once blood glucose returns to normal, provide a small snack containing complex protein/carbs (e.g. crackers with cheese or peanut butter).\nStep 5: If person is UNCONSCIOUS or unable to swallow: Call 911/112 immediately. Place in recovery position. If trained and prescribed Glucagon / Baqsimi nasal powder is available, administer per instructions.",
+    "tags": ["diabetes", "hypoglycemia", "low blood sugar", "insulin", "glucose", "glucagon"],
+    "risk_level": "HIGH",
+    "contraindications": ["DO NOT put food, liquids, or glucose gel in the mouth of an unconscious or seizing diabetic person due to fatal aspiration risk.", "DO NOT administer insulin during hypoglycemia."],
+    "author": "American Diabetes Association (ADA)",
+    "version": 1
+  }
+]

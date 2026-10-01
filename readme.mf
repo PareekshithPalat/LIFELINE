@@ -229,9 +229,10 @@ lifeline/
 │   ├── test_api.py               # FastAPI endpoint integration tests
 │   ├── test_embeddings.py        # FastEmbed dense & sparse vector tests
 │   ├── test_hybrid_retrieval.py  # RRF and multi-tier retrieval tests
-│   ├── test_semantic_cache.py    # Sub-10ms cache and invalidation tests
-│   ├── test_sync.py              # Vector clocks and Safety Maximum tests
-│   └── test_validator_and_risk.py# Contraindication conflict & abstain tests
+│   ├── test_semantic_cache.py    # Tests sub-10ms cache hits, misses, TTL & state-based purges
+│   ├── test_validator_and_risk.py# Tests contraindication detection & abstention triggers
+│   ├── test_sync.py              # Tests vector clock mutation logging & Safety Maximum merge
+└── test_api.py                 # End-to-end FastAPI endpoint integration tests
 ├── docs/
 │   ├── ARCHITECTURE.md           # In-depth technical architecture specification
 │   └── RUNBOOK.md                # Edge operator runbook & verification guide
@@ -242,6 +243,7 @@ lifeline/
 ├── docker-compose.yml            # Docker Compose orchestration
 ├── LICENSE                       # MIT License file
 ├── requirements.txt              # Pinned Python package dependencies
+├── readme.mf                     # Project documentation copy
 └── README.md                     # Project documentation
 ```
 

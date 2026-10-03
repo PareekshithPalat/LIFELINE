@@ -1,0 +1,32 @@
+name: lifeline_mobile
+description: "Lifeline - offline-first emergency memory on Qdrant Edge."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  crypto: ^3.0.7
+  flutter:
+    sdk: flutter
+  flutter_onnxruntime: ^1.8.5
+  http: ^1.6.0
+  path_provider: ^2.1.6
+  qdrant_edge: 0.8.0-dev.4
+  snowball_stemmer: ^0.1.0
+  url_launcher: ^6.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/knowledge/pack.json
+    - assets/models/bge-small-en-v1.5.onnx
+    - assets/models/tokenizer.json

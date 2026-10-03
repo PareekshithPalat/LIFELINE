@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "dense_model": "BAAI/bge-small-en-v1.5",
+  "dense_dim": 384,
+  "bm25": {"language": "english", "k": 1.2, "b": 0.75, "avg_len": 256},
+
+  "gate": {
+    "description": "A trusted protocol is only used when it is clearly relevant. confidence = dense_max_sim + lexical_weight * min(bm25, lexical_cap). Calibrated on tests/eval/retrieval_eval.json: in-domain >= 0.82, out-of-domain / no-protocol <= 0.77.",
+    "lexical_weight": 0.015,
+    "lexical_cap": 10.0,
+    "accept_confidence": 0.79,
+    "min_dense": 0.72,
+    "min_bm25": 0.5,
+    "lexical_only_min_bm25": 6.0,
+    "lexical_only_min_margin": 1.5,
+    "related_margin": 0.02
+  },
+
+  "cache": {
+    "similarity": {"CRITICAL": 0.96, "HIGH": 0.94, "MEDIUM": 0.92, "LOW": 0.9},
+    "ttl_seconds": {"CRITICAL": 120, "HIGH": 300, "MEDIUM": 900, "LOW": 3600},
+    "max_entries": 256,
+    "salient_terms": [
+      "no", "not", "never", "without", "cannot", "can't", "cant", "isn't", "isnt", "wasn't", "won't", "don't", "dont", "doesn't", "unable", "stopped",
+      "baby", "babies", "infant", "infants", "newborn", "child", "children", "kid", "kids", "toddler", "son", "daughter", "boy", "girl", "teen", "teenager", "adolescent", "adult", "elderly", "pregnant",
+      "aspirin", "ibuprofen", "naproxen", "nsaid", "nsaids", "paracetamol", "acetaminophen", "tylenol", "advil", "motrin",
+      "epipen", "epinephrine", "adrenaline", "insulin", "glucagon", "albuterol", "salbutamol", "inhaler", "nitroglycerin",
+      "penicillin", "amoxicillin", "antihistamine", "benadryl", "naloxone", "narcan", "warfarin", "heparin",
+      "peanut", "peanuts", "nut", "nuts", "shellfish", "shrimp", "latex", "bee", "wasp", "egg", "milk"
+    ]
+  }
+}

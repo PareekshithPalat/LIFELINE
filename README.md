@@ -1,483 +1,217 @@
-# LIFELINE: RISK-AWARE ADAPTIVE EMERGENCY MEMORY FOR EDGE DEVICES
+# LIFELINE
 
-> **Offline-First Personal Emergency Memory, Triage & Real-Time Clinical Decision Support for Edge Hardware**  
+> **Risk-Aware Adaptive Emergency Memory for Edge Devices**  
 > *"Your emergency memory. Even when the network isn't there."*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
-[![Qdrant Edge](https://img.shields.io/badge/Qdrant-Edge%20Embedded-dc2626.svg)](https://qdrant.tech/)
-[![React 19](https://img.shields.io/badge/React-19%20%2B%20Vite-61dafb.svg)](https://reactjs.org/)
-[![Tailwind CSS v4](https://img.shields.io/badge/TailwindCSS-v4-38bdf8.svg)](https://tailwindcss.com/)
-[![Tests Passing](https://img.shields.io/badge/Tests-18%20Passing-brightgreen.svg)]()
-[![Offline First](https://img.shields.io/badge/Offline-100%25%20Autonomous-success.svg)]()
+[![Qdrant](https://img.shields.io/badge/Qdrant-Edge%200.8-dc2626.svg)](https://qdrant.tech/documentation/edge/)
+[![Flutter](https://img.shields.io/badge/Flutter-Android%20%7C%20iOS-02569B.svg)](apps/mobile)
+[![React](https://img.shields.io/badge/React-19%20%2B%20Vite-61dafb.svg)](https://reactjs.org/)
 
 ---
 
-## TABLE OF CONTENTS
+## 1. Executive Summary
 
-- [Overview & Philosophy](#overview--philosophy)
-- [Key Features](#key-features)
-- [System Architecture](#system-architecture)
-- [Core Engineering Innovations](#core-engineering-innovations)
-  - [1. Three-Tier Memory Architecture](#1-three-tier-memory-architecture)
-  - [2. Multi-Vector Hybrid Retrieval (Dense + Sparse RRF)](#2-multi-vector-hybrid-retrieval-dense--sparse-rrf)
-  - [3. Evidence-State Semantic Cache](#3-evidence-state-semantic-cache)
-  - [4. Three-State Clinical Evidence Validator](#4-three-state-clinical-evidence-validator)
-  - [5. Offline-First Vector Clock Synchronization](#5-offline-first-vector-clock-synchronization)
-  - [6. Edge Media Storage & Cloudinary Sync](#6-edge-media-storage--cloudinary-sync)
-- [Repository Structure](#repository-structure)
-- [Technology Stack](#technology-stack)
-- [Quickstart Guide](#quickstart-guide)
-  - [Prerequisites](#prerequisites)
-  - [Step 1: Clone & Configure Virtual Environment](#step-1-clone--configure-virtual-environment)
-  - [Step 2: Build Web Console Frontend](#step-2-build-web-console-frontend)
-  - [Step 3: Seed Qdrant Edge Memory](#step-3-seed-qdrant-edge-memory)
-  - [Step 4: Launch Lifeline Server](#step-4-launch-lifeline-server)
-- [Configuration & Environment Variables](#configuration--environment-variables)
-- [REST API Reference](#rest-api-reference)
-- [Automated Verification & Tests](#automated-verification--tests)
-- [Clinical Demonstration Scenarios](#clinical-demonstration-scenarios)
-- [Docker Deployment](#docker-deployment)
-- [Safety & Medical Disclaimer](#safety--medical-disclaimer)
-- [License](#license)
-
----
-
-## OVERVIEW & PHILOSOPHY
-
-**LIFELINE** is an offline-first, risk-aware personal emergency memory and clinical decision-support system designed to operate locally on resource-constrained edge devices—including smartphones, ruggedized field tablets, ambulance telemetry consoles, and remote search-and-rescue nodes.
-
-### The Guiding Tenet
+**LIFELINE** is an offline-first, risk-aware personal emergency memory and decision-support system that runs
+entirely on the device: a phone (Flutter app), a field laptop or an ambulance console (FastAPI node + web console).
 
 > **THE CLOUD SHOULD ENHANCE THE DEVICE.**  
 > **THE CLOUD MUST NOT BE REQUIRED FOR BASIC EMERGENCY MEMORY.**
 
-During catastrophic natural disasters, network blackouts, deep-wilderness expeditions, or mass-casualty incidents, critical medical histories and certified first-aid protocols cannot be trapped behind unreachable remote cloud APIs. Lifeline guarantees 100% offline autonomy: it stores personal medical profiles, retrieves certified clinical guidelines, detects dangerous contraindications, computes triage categories, and guides on-scene responders with sub-second latency—entirely on the device with zero cloud connectivity.
+Lifeline stores the patient's medical vault, retrieves verified first-aid protocols with an embedded
+[Qdrant Edge](https://qdrant.tech/documentation/edge/) engine, removes protocol steps that are unsafe for *this*
+patient, and refuses to guess when no protocol clearly applies. Every instruction it shows is a verbatim step
+from a trusted protocol - nothing is generated.
 
 ---
 
-## KEY FEATURES
+## 2. Core Design
 
-- **100% Offline-First Execution**: Fully operational without cellular data or internet connectivity.
-- **Three-Tier Edge Memory**: Isolates trusted medical protocols, private personal medical profiles, and chronological incident logs.
-- **Qdrant Multi-Vector Retrieval**: Dense semantic search (`BAAI/bge-small-en-v1.5` ONNX) + Sparse BM25 keyword matching fused through Reciprocal Rank Fusion (RRF).
-- **Sub-10ms Semantic Cache**: Evidence-state binding invalidates cached emergency answers the moment patient vitals, allergies, or clinical protocols change.
-- **Zero-Hallucination Clinical Validator**: Tri-state verification (`SUFFICIENT`, `CONFLICT`, `INSUFFICIENT`) prevents unsafe generative medical advice.
-- **Allergy & Contraindication Conflict Detection**: Instantly halts dangerous recommendations (e.g., aspirin for patients with bleeding ulcers or aspirin allergies) and surfaces a high-priority warning banner with safe clinical alternatives.
-- **Vector Clock Mutation Sync**: Buffers offline mutations in an append-only log; synchronizes upstream seamlessly when connectivity is restored using **Safety Maximum** (never drop an allergy) conflict resolution.
-- **Local & Cloud Media Support**: Captures emergency photos (injuries, prescription vials, rash progression) locally on disk and queues them for Cloudinary upload upon reconnect.
-- **START Triage Engine**: Computes immediate Simple Triage and Rapid Treatment (START) color classifications (Immediate, Delayed, Minor, Deceased) based on respirations, perfusion, and mental status.
-- **Modern Responsive Web Console**: Built with React 19, Vite, and Tailwind CSS v4 for rapid high-stress mobile/tablet interaction.
+### 1. Three memory tiers, one Qdrant Edge shard each
 
----
+| Tier | Source of truth | Purpose | Conflict strategy |
+| :--- | :--- | :--- | :--- |
+| **Trusted** | `data/trusted_protocols.json` + signed revisions | Verified first-aid protocols (CPR, bleeding, anaphylaxis, asthma, choking, burns, seizure, stroke, heart attack, poisoning, hypoglycaemia) | **TRUSTED_AUTHORITY** - only a strictly newer version replaces a protocol; protocols only flow *down* from a hub and need the admin key |
+| **Personal** | profile store | Blood group, allergies, medications, conditions, ICE contacts | **SAFETY_MAXIMUM** - allergies, conditions and medications are unioned on merge, never dropped |
+| **Incident** | incident store | On-scene vitals, symptoms and actions, per incident id | **MONOTONIC_APPEND** - append-only, de-duplicated by id |
 
-## SYSTEM ARCHITECTURE
+The JSON stores are the source of truth (atomic writes); the Qdrant Edge shards are a derived index that is
+reconciled at start-up and rebuilt automatically if the schema or embedding model changes.
 
-The diagram below illustrates the end-to-end local query and memory lifecycle on the edge device:
+### 2. Hybrid retrieval with a calibrated relevance gate
+- Each protocol is indexed as **chunks** - its title, lay-language *trigger* phrases ("my dad collapsed and isn't
+  breathing") and every individual step - each with a 384-d `BAAI/bge-small-en-v1.5` vector. A query is scored
+  by its best-matching chunk (max-sim), not an averaged whole-document embedding.
+- A **BM25** sparse vector over the full text (Qdrant Edge's own `Bm25` model, shard modifier `IDF`) captures exact
+  drug names and keywords.
+- The two signals are fused into a calibrated confidence
+  `dense_max_sim + 0.015 * min(bm25, 10)`; a protocol is used only above the thresholds in
+  [`data/retrieval_config.json`](data/retrieval_config.json). Otherwise the system **abstains**.
+- Calibrated and regression-tested on a labelled set ([`tests/eval/retrieval_eval.json`](tests/eval/retrieval_eval.json))
+  of 40 real emergencies, 11 off-domain questions and 9 medical questions with no matching protocol (snake bite,
+  fever, heat stroke…): **60/60 correct** on the backend and on the phone.
 
-```mermaid
-flowchart TD
-    User([User / First Responder]) --> Query[Emergency Query or Triage]
-    Query --> Router[Risk & Intent Router]
-    Router --> Cache{Evidence-State Semantic Cache}
+### 3. Patient safety screening (SUFFICIENT / CONFLICT / INSUFFICIENT)
+- Allergies are normalised and expanded (`"NSAIDs (Ibuprofen, Naproxen)"` → nsaid, ibuprofen, naproxen, aspirin, …;
+  `"Peanuts"` → peanut, peanut butter, …). Conditions and medications add rules (GI bleeding / anticoagulants →
+  no aspirin or NSAIDs; pregnancy → no abdominal thrusts).
+- Age is taken from the request or the query ("my 8 month old") and adds rules: no aspirin for children or
+  adolescents; infants get back blows and chest thrusts instead of the adult choking technique.
+- Any protocol step that violates a rule is **withheld** (and shown struck through with the reason); a question
+  that asks to *give* something unsafe ("can I give aspirin?") gets an explicit **DO NOT GIVE** warning.
+- The owner's allergies are not applied to someone else ("my father has chest pain") - the answer tells the
+  responder to ask about allergies instead.
 
-    Cache -- Cache Hit & State Valid --> FastResp([Instant Response < 10ms])
-    Cache -- Cache Miss or Stale State --> Hybrid[Qdrant Hybrid Retrieval]
+### 4. Evidence-state semantic cache
+An answer is reused only if **all** of these hold: cosine similarity ≥ the risk-adaptive threshold (0.96 critical
+… 0.90 low), *identical safety-relevant words* (negations, age, drugs, allergens - so "is breathing" never reuses
+"is not breathing" and "aspirin" never reuses "ibuprofen"), same age group, TTL alive, unchanged profile version,
+unchanged incident-timeline version and unchanged content hash of every cited protocol. Abstentions are never
+cached; the cache is LRU-bounded and scanned with one vectorised product.
 
-    subgraph QdrantEdge [Embedded Qdrant Edge Engine]
-        T1[(Trusted Clinical Memory)]
-        T2[(Personal Vault Memory)]
-        T3[(Incident Timeline Memory)]
-    end
+### 5. Offline-first replication
+Every change is appended to a durable mutation log. `POST /api/sync/trigger` (or the app's sync button, or the
+background loop) pushes pending entries to the upstream hub and pulls what other nodes produced, applying the
+strategies above. **Every Lifeline API is also a hub** (`/api/sync/hub/push|pull`), which is how the phone syncs.
 
-    Hybrid --> Dense[Dense 384-d Cosine Vector Search]
-    Hybrid --> Sparse[Sparse BM25 Keyword Search]
-    Dense & Sparse --> RRF[Reciprocal Rank Fusion k=60]
+### 6. Mobile app with the same engine on the phone
+[`apps/mobile`](apps/mobile) is a Flutter app that runs the full pipeline on-device: Qdrant Edge (Dart bindings),
+the same ONNX embedding model via ONNX Runtime, a bit-exact Dart port of Qdrant's BM25, the safety engine, the
+semantic cache, triage, the vault, the incident log and hub sync. Protocol vectors ship precomputed in a
+knowledge pack. See [`apps/mobile/README.md`](apps/mobile/README.md).
 
-    RRF --> Reranker[Risk-Aware Authority Reranker]
-    Reranker --> Validator{Clinical Evidence Validator}
-
-    Validator -- SUFFICIENT --> Grounding[Adaptive Grounding Engine]
-    Validator -- CONFLICT --> Escalation[STOP Alert: Contraindication Detected]
-    Validator -- INSUFFICIENT --> Abstain[Abstain: Primary ABC Protocol + EMS Call]
-
-    Grounding --> Result([Grounded Checklist + Source Citations])
-    Escalation --> Result
-    Abstain --> Result
-
-    Result --> CacheWrite[Bind SHA-256 Evidence Hashes & Save to Cache]
-```
-
----
-
-## CORE ENGINEERING INNOVATIONS
-
-### 1. Three-Tier Memory Architecture
-
-Lifeline partitions its embedded Qdrant vector database into three strictly isolated collections with customized authority weighting and conflict strategies:
-
-| Tier | Collection Identifier | Content Description | Authority Weight | Conflict Strategy |
-| :--- | :--- | :--- | :---: | :--- |
-| **TRUSTED** | `lifeline_trusted_memory` | Preloaded, peer-reviewed clinical guidelines (AHA CPR/AED, Anaphylaxis Epinephrine, Severe Bleeding, Burns, Asthma, FAST Stroke, Poisoning). | `1.35x` | **TRUSTED_AUTHORITY**: Signed upstream medical versions supersede local drafts. |
-| **PERSONAL** | `lifeline_personal_memory` | Confidential patient profile: confirmed blood group, documented allergies, active medications, chronic conditions, and ICE emergency contacts. | `1.25x` | **SAFETY_MAXIMUM**: Never deletes an allergy or illness; merges profiles via safety union. |
-| **INCIDENT** | `lifeline_incident_memory` | Temporal stream of on-scene vital signs (Heart Rate, SpO2, Blood Pressure), symptoms, and responder interventions. | `1.15x` | **MONOTONIC_APPEND**: Append-only CRDT log preserving true chronological field evidence. |
+### 7. Security
+- `LIFELINE_API_KEY` protects every `/api` route (`X-API-Key`); CORS is limited to configured origins.
+- Publishing a trusted protocol requires `LIFELINE_ADMIN_KEY` (`X-Admin-Key`); client-supplied hashes are ignored.
+- Uploaded media are stored under server-generated names with type and size limits (no path traversal).
 
 ---
 
-### 2. Multi-Vector Hybrid Retrieval (Dense + Sparse RRF)
-
-In life-critical emergency queries, dense embeddings alone can overlook specific drug brand names or milligram dosages, while keyword search fails to comprehend descriptive medical terminology. Lifeline resolves this via dual-vector hybrid search:
-
-1. **Dense Semantic Embeddings**: 384-dimensional cosine vectors generated locally via FastEmbed ONNX runtime (`BAAI/bge-small-en-v1.5`).
-2. **Sparse BM25 Vectors**: Tokenized exact-match representations for crucial medical entities (*"EpiPen 0.3mg"*, *"Aspirin 325mg"*, *"Tourniquet"*, *"AED"*, *"Albuterol"*).
-3. **Reciprocal Rank Fusion (RRF)**:
-   $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{dense}, \text{sparse}\}} \frac{1.0}{k + \text{rank}_m(d)}$$
-   where $k = 60$. Candidates are then weighted by memory tier authority and passed to the reranking stage.
-
----
-
-### 3. Evidence-State Semantic Cache
-
-Traditional LLM/SLM semantic caches produce fatal hallucinations in medical contexts if patient state or incident vitals mutate after a query is cached.
-
-Lifeline's **Evidence-State Semantic Cache** binds each entry to:
-- Dense query embedding vector with risk-adaptive cosine thresholds:
-  - `CRITICAL`: $\ge 0.96$ (TTL: 120s)
-  - `HIGH`: $\ge 0.94$ (TTL: 300s)
-  - `MEDIUM`: $\ge 0.90$ (TTL: 900s)
-  - `LOW`: $\ge 0.88$ (TTL: 3600s)
-- **Exact SHA-256 content hashes** of all grounding evidence documents.
-- **Active Personal Profile Version ID**.
-- **Active Incident Timeline Version ID**.
-
-> [!IMPORTANT]
-> **State-Triggered Cache Invalidation**: If the patient's allergy profile changes, if on-scene responders log a new SpO2 or blood pressure observation, or if a clinical guideline is updated, all bound cache entries are immediately purged.
-
----
-
-### 4. Three-State Clinical Evidence Validator
-
-To eliminate dangerous generative medical hallucinations, Lifeline employs a deterministic evidence validator before generating advice:
-
-- **`SUFFICIENT`**: Grounding evidence provides clear, uncontradicted instructions. Lifeline outputs an actionable, step-by-step checklist with exact protocol citations.
-- **`CONFLICT`**: Active contraindication detected between the clinical protocol and the patient's personal vault (e.g., protocol indicates Aspirin for myocardial infarction, but patient profile flags an active Aspirin allergy or bleeding ulcer). The pipeline halts execution, generates a high-visibility **STOP** alert banner, and offers safe clinical alternatives.
-- **`INSUFFICIENT`**: Retrieval confidence falls below clinical threshold or query is ambiguous/off-domain. The system **ABSTAINS** from guessing, surfaces primary Airway-Breathing-Circulation (ABC) guidelines, and instructs immediate contact with emergency dispatch (911/112).
-
----
-
-### 5. Offline-First Vector Clock Synchronization
-
-When operating offline, edge devices record mutations (profile updates, incident timeline logs) in an append-only transaction ledger stamped with node-specific vector clocks:
-
-```
-{ "node_id": "edge_device_alpha", "counter": 4 }
-```
-
-When network connectivity is re-established:
-1. Pending mutations are transmitted to the upstream server via `POST /api/sync/trigger`.
-2. **Personal Profiles** are reconciled using **Safety Maximum**: the union of all allergies and chronic conditions across both nodes is preserved.
-3. **Incident Observations** are merged monotonically into the chronological timeline without overwriting on-scene history.
-
----
-
-### 6. Edge Media Storage & Cloudinary Sync
-
-- Emergency scene media (lacerations, rash progression, prescription bottles) are saved directly to local disk (`media/uploads/`) for immediate offline review.
-- If Cloudinary credentials are configured, uploads are placed in an asynchronous sync queue that flushes automatically when connectivity is restored.
-
----
-
-## REPOSITORY STRUCTURE
+## 3. Repository Structure
 
 ```
 lifeline/
 ├── apps/
-│   ├── api/                      # FastAPI backend service
-│   │   ├── main.py               # API entrypoint, static assets & lifecycle hooks
-│   │   └── routes/               # Modular route controllers
-│   │       ├── cache.py          # Cache stats and manual purge
-│   │       ├── emergency.py      # Emergency query and START triage endpoints
-│   │       ├── media.py          # Offline media storage and sync endpoints
-│   │       ├── memory.py         # Personal, Trusted, and Incident memory endpoints
-│   │       └── sync.py           # Vector clock sync and network mode toggles
-│   └── web/                      # React 19 + Vite + Tailwind CSS v4 Web Console
-│       ├── src/
-│       │   ├── App.tsx           # Interactive emergency triage dashboard
-│       │   ├── api.ts            # Typed HTTP client
-│       │   └── types.ts          # TypeScript interfaces
-│       ├── package.json          # Node dependencies
-│       └── vite.config.ts        # Vite build configuration
+│   ├── api/                 # FastAPI node: routes, API-key/admin security, static web console
+│   ├── web/                 # React 19 + Vite + Tailwind web console
+│   └── mobile/              # Flutter app: on-device Qdrant Edge + ONNX + safety engine
 ├── edge/
-│   ├── cache/                    # Risk-adaptive evidence-state semantic cache
-│   ├── embeddings/               # FastEmbed local ONNX dense & sparse engines
-│   ├── qdrant/                   # Embedded Qdrant client & collection management
-│   ├── retrieval/                # Multi-tier hybrid search & Reciprocal Rank Fusion
-│   ├── runtime/                  # Pipeline router, reranker, SLM, and validator
-│   ├── sync/                     # Vector clock sync controller & conflict resolvers
-│   └── media.py                  # Offline-first media manager & Cloudinary client
-├── models/
-│   ├── enums.py                  # RiskLevel, MemoryTier, ClinicalVerdict, TriageCategory
-│   └── schemas.py                # Pydantic schemas for queries, responses, and records
+│   ├── config.py            # Settings (env vars) + calibrated retrieval config
+│   ├── stores.py            # Source-of-truth JSON stores (profile, incidents, trusted)
+│   ├── bootstrap.py         # Reconciles the Qdrant Edge index with the stores
+│   ├── memory_service.py    # Single write path: store -> index -> cache -> sync log
+│   ├── qdrant/client.py     # Qdrant Edge shards (chunked dense + BM25/IDF)
+│   ├── embeddings/          # bge-small dense (FastEmbed) + Qdrant Edge Bm25
+│   ├── retrieval/hybrid.py  # Hybrid search + calibrated fusion
+│   ├── cache/               # Evidence-state semantic cache
+│   ├── runtime/             # router, validator (gate), safety, responder, triage, pipeline
+│   ├── sync/controller.py   # Mutation log, hub + client replication, conflict strategies
+│   └── media.py             # Offline-first media storage (+ optional Cloudinary)
+├── models/                  # Pydantic schemas and enums
 ├── data/
-│   ├── trusted_protocols.json     # Preloaded certified clinical guidelines
-│   └── default_personal.json      # Default patient emergency vault profile
+│   ├── trusted_protocols.json   # Verified protocols (+ trigger phrases)
+│   ├── default_personal.json    # Seed patient profile
+│   ├── retrieval_config.json    # Calibrated thresholds shared by backend and app
+│   └── bm25_stopwords_en.json   # Qdrant's English stopwords (used by the Dart BM25 port)
 ├── scripts/
-│   ├── seed_data.py              # Seeds Qdrant Edge with protocols & vault data
-│   └── demo_scenario.py          # End-to-end clinical demonstration CLI
-├── tests/                        # 18 automated unit and integration tests
-│   ├── test_api.py               # FastAPI endpoint integration tests
-│   ├── test_embeddings.py        # FastEmbed dense & sparse vector tests
-│   ├── test_hybrid_retrieval.py  # RRF and multi-tier retrieval tests
-│   ├── test_semantic_cache.py    # Sub-10ms cache and invalidation tests
-│   ├── test_sync.py              # Vector clocks and Safety Maximum tests
-│   └── test_validator_and_risk.py# Contraindication conflict & abstain tests
-├── docs/
-│   ├── ARCHITECTURE.md           # In-depth technical architecture specification
-│   └── RUNBOOK.md                # Edge operator runbook & verification guide
-├── docker/
-│   └── Dockerfile                # Multi-stage container build
-├── .env.example                  # Environment configuration template
-├── .gitignore                    # Git exclusion rules (including .env & .env.example)
-├── docker-compose.yml            # Docker Compose orchestration
-├── LICENSE                       # MIT License file
-├── requirements.txt              # Pinned Python package dependencies
-└── README.md                     # Project documentation
+│   ├── seed_data.py             # Index the stores into Qdrant Edge
+│   ├── demo_scenario.py         # End-to-end demonstration
+│   └── build_mobile_pack.py     # Knowledge pack + model + parity fixtures for the app
+├── tests/                   # pytest suite incl. the labelled eval set and a two-node sync test
+├── docs/                    # ARCHITECTURE.md, RUNBOOK.md
+└── docker/, docker-compose.yml
 ```
 
 ---
 
-## TECHNOLOGY STACK
+## 4. Quickstart (backend + web console)
 
-- **Backend & Core Engine**: Python 3.12, FastAPI, Uvicorn, Pydantic v2
-- **Vector Database**: Qdrant Edge (Embedded local storage via `qdrant-client`)
-- **Embedding Engine**: FastEmbed ONNX Runtime (`BAAI/bge-small-en-v1.5` dense + BM25 sparse)
-- **Frontend Console**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide Icons
-- **Media & Sync**: Local Disk File Store + Optional Cloudinary SDK
-- **Testing & Quality Assurance**: Pytest, Pytest-Asyncio, HTTPX
-
----
-
-## QUICKSTART GUIDE
-
-### Prerequisites
-
-- **Python**: Version 3.11+ (Python 3.12 recommended)
-- **Node.js**: Version 18+ (Node 20+ recommended)
-- **Git**: Installed and configured on your path
-
----
-
-### Step 1: Clone & Configure Virtual Environment
-
-#### Windows (PowerShell):
-```powershell
-# Clone the repository
-git clone https://github.com/your-username/LIFELINE.git
-cd LIFELINE
-
-# Create virtual environment
+```bash
 python -m venv .venv
-
-# Activate virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# Install backend dependencies
+.\.venv\Scripts\Activate.ps1          # Windows   |   source .venv/bin/activate (Linux/macOS)
 pip install -r requirements.txt
+
+cd apps/web && npm install && npm run build && cd ../..
+
+python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
 ```
+Open **`http://localhost:8000`** (API docs at `/docs`). On first start the embedding model (~66 MB) is downloaded
+into `data/models/` and the protocols are indexed; after that the node needs no network at all.
 
-#### macOS / Linux (Bash):
-```bash
-# Clone the repository
-git clone https://github.com/your-username/LIFELINE.git
-cd LIFELINE
-
-# Create virtual environment
-python3 -m venv .venv
-
-# Activate virtual environment
-source .venv/bin/activate
-
-# Install backend dependencies
-pip install -r requirements.txt
-```
+For the mobile app see [`apps/mobile/README.md`](apps/mobile/README.md).
 
 ---
 
-### Step 2: Build Web Console Frontend
+## 5. Environment Configuration
 
-```bash
-cd apps/web
-npm install
-npm run build
-cd ../..
-```
+Copy `.env.example` to `.env`.
 
-This compiles the React 19 + Tailwind CSS frontend into `apps/web/dist/`, which FastAPI automatically serves at the root path (`/`).
-
----
-
-### Step 3: Seed Qdrant Edge Memory
-
-Seed the local embedded Qdrant database with certified clinical emergency protocols and the default personal profile vault:
-
-```bash
-python scripts/seed_data.py
-```
-
-*Note: The FastAPI service will also automatically verify and seed these collections on startup if they are uninitialized.*
-
----
-
-### Step 4: Launch Lifeline Server
-
-```bash
-python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Open **`http://localhost:8000`** in your web browser to access the interactive Lifeline Emergency Web Console.  
-Interactive Swagger API documentation is available at **`http://localhost:8000/docs`**.
-
----
-
-## CONFIGURATION & ENVIRONMENT VARIABLES
-
-Copy the configuration template to `.env` to customize settings:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Default Value | Description |
+| Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `LIFELINE_NODE_ID` | `edge_device_alpha` | Unique identifier for this edge device node. |
-| `QDRANT_STORAGE_PATH` | `./data/qdrant_storage` | Local directory for embedded Qdrant persistence. |
-| `QDRANT_MEMORY_MODE` | `false` | When `true`, runs Qdrant entirely in RAM (useful for testing). |
-| `QDRANT_URL` | *Optional* | Upstream Qdrant cluster URL for online synchronization. |
-| `QDRANT_API_KEY` | *Optional* | API key for upstream Qdrant cluster. |
-| `LIFELINE_SERVER_URL` | *Optional* | Central Lifeline mesh server URL for fleet synchronization. |
-| `OLLAMA_URL` | `http://localhost:11434` | Optional local Ollama SLM endpoint. |
-| `OLLAMA_MODEL` | `llama3.2:1b` | Local SLM model name. |
-| `CLOUDINARY_CLOUD_NAME`| *Optional* | Cloudinary cloud name for media backup. |
-| `CLOUDINARY_API_KEY` | *Optional* | Cloudinary API key. |
-| `CLOUDINARY_API_SECRET`| *Optional* | Cloudinary API secret. |
-| `HOST` | `0.0.0.0` | Server bind host. |
-| `PORT` | `8000` | Server listen port. |
+| `LIFELINE_NODE_ID` | `edge_device_alpha` | Node identity in the replication log |
+| `LIFELINE_API_KEY` | *(unset)* | Required `X-API-Key` for every `/api` route - **set it before exposing the node** |
+| `LIFELINE_ADMIN_KEY` | *(unset)* | Required `X-Admin-Key` to publish trusted protocols (editing disabled when unset) |
+| `LIFELINE_CORS_ORIGINS` | localhost dev origins | Comma-separated allowed browser origins |
+| `LIFELINE_SERVER_URL` / `LIFELINE_SERVER_API_KEY` | *(unset)* | Upstream hub for replication |
+| `LIFELINE_DATA_DIR` / `LIFELINE_RUNTIME_DIR` | `data/`, `data/runtime/` | Seeds and mutable state |
+| `QDRANT_STORAGE_PATH` | `data/edge_shards/` | Qdrant Edge shard directory |
+| `FASTEMBED_CACHE_PATH` | `data/models/` | Embedding model cache (kept for offline use) |
+| `QDRANT_MEMORY_MODE` | `false` | Ephemeral shards (tests) |
+| `LIFELINE_ENABLE_LLM_SUMMARY`, `OLLAMA_URL`, `OLLAMA_MODEL` | off | Optional one-line summary from a local model; it never changes the steps |
+| `LIFELINE_MAX_UPLOAD_MB` | `15` | Media upload limit |
+| `CLOUDINARY_*` | *(unset)* | Optional media upload when online |
 
 ---
 
-## REST API REFERENCE
+## 6. API Reference
 
 | Endpoint | Method | Description |
 | :--- | :---: | :--- |
-| `/api/system/health` | `GET` | System operational status, offline/online network mode, and collection counts. |
-| `/api/emergency/query` | `POST` | Execute natural-language emergency triage query through the hybrid pipeline. |
-| `/api/emergency/triage` | `POST` | Calculate immediate START triage categorization from physiological vitals. |
-| `/api/memory/personal` | `GET` | Retrieve active personal emergency medical vault profile. |
-| `/api/memory/personal` | `PUT` | Update patient emergency vault (triggers cache invalidation & vector clock). |
-| `/api/memory/incident` | `GET` | Fetch chronological on-scene incident timeline. |
-| `/api/memory/incident` | `POST` | Append vitals observation or responder action to timeline. |
-| `/api/memory/trusted` | `GET` | Query and browse preloaded certified clinical emergency protocols. |
-| `/api/memory/trusted` | `POST` | Ingest or update clinical guidelines. |
-| `/api/cache/stats` | `GET` | View semantic cache statistics, hit rate, and invalidation counters. |
-| `/api/cache/clear` | `POST` | Manually flush the evidence-state semantic cache. |
-| `/api/sync/status` | `GET` | Inspect local vector clocks and pending mutation counts. |
-| `/api/sync/trigger` | `POST` | Trigger bidirectional synchronization cycle with upstream server. |
-| `/api/sync/toggle-network` | `POST` | Simulate switching between offline and online network states. |
-| `/api/media/upload` | `POST` | Upload on-scene emergency photo (saved to local disk + queued for cloud). |
-| `/api/media/file/{file}` | `GET` | Serve stored local emergency media asset. |
+| `/api/system/health` | GET | Liveness, shard stats, model readiness (no patient data, no key needed) |
+| `/api/emergency/query` | POST | Emergency question → grounded answer (`query`, `incident_id`, `age_category`, `allow_cache`) |
+| `/api/emergency/triage` | POST | Age- and vault-aware rapid triage |
+| `/api/memory/personal` | GET / PUT | Patient vault (version always increases) |
+| `/api/memory/incident` | GET / POST | Incident timeline (`?incident_id=`), append-only |
+| `/api/memory/trusted` | GET / POST | Protocols; POST needs `X-Admin-Key` and a newer version |
+| `/api/cache/stats`, `/api/cache/clear` | GET / POST | Cache statistics / purge |
+| `/api/sync/status`, `/trigger`, `/pending`, `/toggle-network` | GET / POST | Replication client |
+| `/api/sync/hub/push`, `/api/sync/hub/pull` | POST / GET | Hub endpoints used by other nodes (e.g. the phone) |
+| `/api/media/upload`, `/api/media/file/{media_id}` | POST / GET | Offline-first media |
 
 ---
 
-## AUTOMATED VERIFICATION & TESTS
-
-The repository includes a comprehensive 18-test suite verifying embedding generation, hybrid search math, cache invalidation, conflict detection, and end-to-end API workflows.
-
-Run all tests via pytest:
+## 7. Verification & Testing
 
 ```bash
-pytest -v tests/
-```
+pytest -q tests/                      # backend: unit, eval set, API, two-node sync over HTTP
+python scripts/demo_scenario.py       # walkthrough of the main behaviours
 
-### Test Suite Structure
-
-```
-tests/
-├── test_embeddings.py          # Validates 384-d dense vectors, BM25 tokens & cosine math
-├── test_hybrid_retrieval.py    # Validates Reciprocal Rank Fusion & multi-tier weighting
-├── test_semantic_cache.py      # Tests sub-10ms cache hits, misses, TTL & state-based purges
-├── test_validator_and_risk.py  # Tests contraindication detection & abstention triggers
-├── test_sync.py                # Tests vector clock mutation logging & Safety Maximum merge
-└── test_api.py                 # End-to-end FastAPI endpoint integration tests
+cd apps/mobile
+flutter test                          # Dart engine on real Qdrant Edge: BM25/tokenizer parity + eval set
+flutter test integration_test -d <device>   # on a phone/emulator: ONNX parity, eval set, UI smoke test
 ```
 
 ---
 
-## CLINICAL DEMONSTRATION SCENARIOS
-
-Run the automated interactive CLI demonstration scenario to observe Lifeline's capabilities in real time:
+## 8. Docker Deployment
 
 ```bash
-python scripts/demo_scenario.py
+echo "LIFELINE_API_KEY=$(openssl rand -hex 16)" >> .env
+docker compose up --build
 ```
-
-### Demonstrated Clinical Workflows:
-1. **Scenario 1 — Adult Cardiac Arrest**: Critical risk detection, hybrid retrieval of certified AHA guidelines, SUFFICIENT evidence verdict, CPR/AED checklist with source citations.
-2. **Scenario 2 — Semantic Cache Acceleration**: Identical/similar query executes in `< 10ms` directly from the Evidence-State Semantic Cache.
-3. **Scenario 3 — Contraindication Detection & Escalation**: Query for chest pain relief detects patient's recorded Aspirin allergy and bleeding ulcer; immediately issues a **STOP ALERT** and provides safe alternative clinical interventions.
-4. **Scenario 4 — State-Triggered Cache Invalidation**: Updates patient medical vault profile; verifies that previously cached entries are automatically invalidated and purged to prevent stale medical guidance.
+The image bakes in the embedding model, so the container works with no network. State and shards live in named
+volumes.
 
 ---
 
-## DOCKER DEPLOYMENT
+## 9. Medical disclaimer
 
-Deploy the complete Lifeline system in an isolated container using Docker Compose:
+Lifeline supports trained and untrained responders with verified first-aid protocols. It does not diagnose,
+does not replace professional medical care, and always directs the user to call emergency services. Protocol
+content must be reviewed by a qualified clinician before deployment.
 
-```bash
-# Build and run container
-docker-compose up --build
+## 10. License
 
-# Run in background (detached mode)
-docker-compose up -d
-```
-
-The containerized service will be available at **`http://localhost:8000`**.
-
----
-
-## SAFETY & MEDICAL DISCLAIMER
-
-> [!CAUTION]
-> **IMPORTANT SAFETY NOTICE**: Lifeline is an assistive edge decision-support tool created for emergency preparedness, research, and field demonstration. It is designed to aid trained responders and individuals during infrastructure failure. It does not replace professional medical judgment, diagnosis, or care from certified emergency medical services (EMS). In any life-threatening situation where communication is functional, contact your local emergency services (e.g., 911 in North America, 112 in Europe, 999 in the UK) immediately.
-
----
-
-## LICENSE
-
-This project is licensed under the **MIT License**.
-
-```
-MIT License
-
-Copyright (c) 2026 Lifeline Project Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-See the full [LICENSE](file:///P:/Projects/LIFELINE/LICENSE) file for complete terms.
+This project is licensed under the [MIT License](LICENSE).

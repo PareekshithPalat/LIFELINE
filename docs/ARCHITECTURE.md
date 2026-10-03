@@ -5,118 +5,150 @@
 
 ---
 
-## 1. System Overview & Core Philosophy
+## 1. System overview
 
-Lifeline is built on a non-negotiable architectural tenet:
+Lifeline is built on one non-negotiable tenet:
 
 > **THE CLOUD SHOULD ENHANCE THE DEVICE. THE CLOUD MUST NOT BE REQUIRED FOR BASIC EMERGENCY MEMORY.**
 
-During catastrophic network failure, natural disasters, or remote field emergencies, critical medical guidance and patient health history cannot be trapped behind an unreachable cloud API. Lifeline provides a completely autonomous, offline-first personal emergency memory system executed locally on edge devices.
+The same engine runs in two places:
+
+| | Backend node (`apps/api`, `edge/`) | Phone (`apps/mobile`) |
+| :--- | :--- | :--- |
+| Vector engine | Qdrant Edge (`qdrant-edge-py`) | Qdrant Edge (`qdrant_edge` Dart/UniFFI) |
+| Dense embeddings | bge-small-en-v1.5 ONNX via FastEmbed | the same ONNX file via ONNX Runtime |
+| Sparse embeddings | Qdrant Edge `Bm25` | bit-exact Dart port (tested against Python) |
+| Protocol vectors | embedded at index time | precomputed in the knowledge pack |
+| Role in sync | client **and** hub | client |
 
 ```mermaid
 flowchart TD
-    User([User: Emergency Query / Triage]) --> Router[Intent + Risk Router]
-    Router --> Cache{Evidence-State Semantic Cache}
-    
-    Cache -- Cache Hit & State Valid --> FastResp([Instant Grounded Response < 10ms])
-    Cache -- Cache Miss or Invalid State --> Hybrid[Qdrant Edge Hybrid Retrieval]
-    
-    subgraph QdrantEdge [Qdrant Edge Storage]
-        T1[(Trusted Clinical Memory)]
-        T2[(Personal Vault Memory)]
-        T3[(Incident Timeline Memory)]
-    end
-    
-    Hybrid --> Dense[Dense ONNX 384-d Search]
-    Hybrid --> Sparse[Sparse BM25 Keyword Search]
-    
-    Dense & Sparse --> RRF[Reciprocal Rank Fusion]
-    RRF --> Reranker[Risk-Aware Reranker]
-    Reranker --> Validator{Evidence Validator}
-    
-    Validator -- SUFFICIENT --> SLM[Adaptive Edge Grounding Engine]
-    Validator -- CONFLICT --> Escalation[Escalate: STOP & Contraindication Warnings]
-    Validator -- INSUFFICIENT --> Abstain[Abstain: Primary ABC Protocol & EMS Call]
-    
-    SLM --> Grounded([Grounded Emergency Response + Citations])
-    Escalation --> Grounded
-    Abstain --> Grounded
-    
-    Grounded --> CacheWrite[Bind Evidence Hashes & Write Cache]
+    Q([Query]) --> R[Router: risk, intent, age]
+    R -->|vault / incident question| M[Answer directly from the vault or timeline]
+    R --> E[Embed once: dense 384-d + BM25]
+    E --> C{Evidence-state semantic cache}
+    C -- valid hit --> OUT([Grounded response])
+    C -- miss / invalid --> H[Qdrant Edge hybrid search<br/>max-sim over chunks + BM25/IDF]
+    H --> G{Calibrated relevance gate}
+    G -- below threshold --> A[ABSTAIN: call EMS + ABC checks]
+    G -- accepted --> S[Safety screening<br/>allergies, conditions, meds, age]
+    S -- steps withheld / unsafe request --> X[CONFLICT: safe steps only + DO NOT warnings]
+    S -- clean --> V[SUFFICIENT: every protocol step]
+    X --> OUT
+    V --> OUT
+    A --> OUT
+    V --> W[Cache write bound to hashes + versions]
+    X --> W
 ```
 
 ---
 
-## 2. The Three Memory Tiers
+## 2. Storage
 
-| Memory Tier | Collection Name | Purpose | Authority Weight | Conflict Strategy |
-| :--- | :--- | :--- | :--- | :--- |
-| **TRUSTED** | `lifeline_trusted_memory` | Clinical emergency protocols (CPR, Hemorrhage, Anaphylaxis, Asthma, Burns, Stroke). | `1.35x` | **TRUSTED_AUTHORITY** (Signed upstream clinical versions supersede local drafts). |
-| **PERSONAL** | `lifeline_personal_memory` | Patient medical profile: Blood group, severe allergies, active medications, chronic illnesses, ICE contacts. | `1.25x` | **SAFETY_MAXIMUM** (Never delete an allergy; union of safety constraints). |
-| **INCIDENT** | `lifeline_incident_memory` | Temporal on-scene timeline: Vitals (HR, SpO2, BP), symptoms observed, actions taken. | `1.15x` | **MONOTONIC_APPEND** (CRDT append-only log preserving chronological observations). |
+Source of truth is a set of JSON stores written atomically (write + fsync + rename). Qdrant Edge is a derived
+index, reconciled on start-up (`edge/bootstrap.py`; `Lifeline._reconcileIndex` on the phone): only items whose
+content hash changed are re-embedded.
 
----
+Each memory tier is one `EdgeShard` with:
 
-## 3. Hybrid Dense + Sparse Retrieval & RRF
+* named dense vector `dense` - 384-d, cosine
+* named sparse vector `bm25` - modifier `IDF` (required for real BM25 scoring)
 
-In high-stakes medical emergencies, neither pure dense semantic search nor pure keyword search is sufficient:
-- **Dense Vectors (384-d Cosine via BAAI/bge-small-en-v1.5)** capture semantic meaning (e.g., *"victim unconscious, not breathing"* maps semantically to *Cardiopulmonary Resuscitation*).
-- **Sparse BM25 Vectors** ensure precise exact-match retrieval for medication names, dosages, and emergency acronyms (*"EpiPen 0.3mg"*, *"Aspirin"*, *"AED"*, *"Tourniquet"*, *"Albuterol"*).
+Each evidence item becomes:
 
-Ranks from both vectors are combined via **Reciprocal Rank Fusion (RRF)**:
-$$RRF\_Score(d) = \frac{1.0}{k + \text{rank}_{dense}(d)} + \frac{1.0}{k + \text{rank}_{sparse}(d)}$$
-where $k = 60$.
+* **one doc point** - BM25 vector of the full text (title, content, tags, triggers) and the full item as payload
+* **N chunk points** - dense vectors of the title, each trigger phrase and each step
 
----
-
-## 4. Evidence-State Semantic Cache
-
-Traditional semantic caches produce fatal hallucinations in medical contexts if patient state or incident vitals change after caching.
-
-Lifeline's **Evidence-State Semantic Cache** binds each cache entry to:
-1. Dense query vector embedding.
-2. Risk-Adaptive Cosine Thresholds:
-   - `CRITICAL`: $\ge 0.96$ (TTL: 120s)
-   - `HIGH`: $\ge 0.94$ (TTL: 300s)
-   - `MEDIUM`: $\ge 0.90$ (TTL: 900s)
-   - `LOW`: $\ge 0.88$ (TTL: 3600s)
-3. Bound Evidence IDs and their SHA-256 content hashes.
-4. Active Personal Profile Version.
-5. Active Incident Timeline Version.
-
-**State Invalidation Trigger**: If the user's allergy profile version increments, if on-scene responders log a new incident observation, or if a bound clinical protocol's hash mutates, the cache entry is immediately invalidated and purged.
+A `manifest.json` records the schema version and dense model. If either changes, the shards are rebuilt so
+vectors from different embedding spaces are never mixed. If the dense model cannot load, the system runs in a
+stricter **lexical-only** mode instead of substituting pseudo-vectors.
 
 ---
 
-## 5. Three-State Evidence Validator
+## 3. Retrieval and the relevance gate
 
-The system strictly avoids generative hallucination through a 3-state clinical verdict:
+For a query the shard returns, per evidence item, `dense_score` (max cosine over its chunks) and `bm25_score`.
+They are fused as
 
-1. **`SUFFICIENT`**: Evidence contains direct, verified instructions addressing the situation. The system proceeds to synthesize numbered action checklists with exact citations.
-2. **`CONFLICT`**: Active contraindication detected (e.g. Protocol advises Aspirin, but personal vault contains Aspirin allergy or bleeding ulcer). The system halts the action, outputs an immediate **STOP** warning banner, and displays safe emergency alternatives.
-3. **`INSUFFICIENT`**: Confidence score falls below clinical threshold or query is off-domain. The system **ABSTAINS** from guessing, surfaces 911/112 dispatch guidance, and provides primary Airway-Breathing-Circulation protocols.
+```
+confidence = dense_score + 0.015 * min(bm25_score, 10)
+```
+
+and a protocol is accepted only if `confidence >= 0.79`, `dense_score >= 0.72` and `bm25_score >= 0.5`
+(lexical-only mode: `bm25 >= 6` with a 1.5 margin over the runner-up). Constants live in
+`data/retrieval_config.json` and are shared with the phone through the knowledge pack.
+
+Rank-only fusion (RRF) is deliberately not used for the decision: it discards the score magnitudes that separate
+"relevant" from "merely the closest thing", which is exactly how an off-topic question used to receive a protocol.
+
+**Calibration** (`tests/eval/retrieval_eval.json`, 60 labelled queries): in-domain confidence ≥ 0.82, off-domain and
+no-protocol ≤ 0.77. Both implementations must answer all 60 correctly (`tests/test_eval_set.py`,
+`apps/mobile/test/pipeline_eval_test.dart`, and on-device `integration_test/app_test.dart`).
+
+When the patient's age is known, a protocol for that population (`metadata.population`) is preferred among the
+accepted ones (infant CPR over adult CPR).
 
 ---
 
-## 6. Offline-First Sync & Conflict Resolution
+## 4. Safety screening
+
+`edge/runtime/safety.py` (and `lib/engine/safety.dart`) builds a `SafetyContext`:
+
+| Source | Example | Effect |
+| :--- | :--- | :--- |
+| Allergy (normalised + class expansion) | `NSAIDs (Ibuprofen, Naproxen)` | withhold steps mentioning nsaid, ibuprofen, naproxen, aspirin, … |
+| Condition / medication | GI bleeding, warfarin | withhold aspirin / NSAID steps |
+| Condition | pregnancy | withhold abdominal thrusts |
+| Age | infant | withhold adult choking technique, insert infant back-blow/chest-thrust step |
+| Age | child, adolescent | withhold aspirin |
+| Condition | asthma, diabetes, epilepsy | caution only |
+
+Verdicts:
+
+* **SUFFICIENT** - accepted protocol, nothing withheld: every step, verbatim.
+* **CONFLICT** - steps withheld or the question asks to give something unsafe: remaining steps, struck-through
+  withheld steps with reasons, `DO NOT GIVE …` warnings, escalation.
+* **INSUFFICIENT** - gate rejected: no protocol is shown; fixed "call EMS + ABC" fallback.
+
+The owner's profile is applied unless the query clearly describes someone else ("my father", "a stranger") or a
+different age group. Ambiguous wording ("the patient") keeps it applied, since a responder may be using the
+owner's phone.
+
+---
+
+## 5. Evidence-state semantic cache
+
+| Check | Why |
+| :--- | :--- |
+| cosine ≥ 0.96 / 0.94 / 0.92 / 0.90 (critical → low) | paraphrase reuse only |
+| identical salient terms (negations, age words, drugs, allergens, numbers) | embeddings barely move between "breathing" and "not breathing" or between two drug names |
+| same age group | infant vs adult answers differ |
+| TTL 2 min … 1 h by risk | bounded staleness |
+| profile version, incident version | patient state changed |
+| hash of every cited trusted item | protocol revised |
+
+INSUFFICIENT answers are never cached; the cache is LRU-bounded (256) and scanned with one matrix-vector product.
+
+---
+
+## 6. Replication
 
 ```mermaid
 sequenceDiagram
-    participant E as Edge Device (Lifeline)
-    participant L as Local Append-Only Log
-    participant S as Upstream Server
-
-    Note over E: Network Disconnected (Offline)
-    E->>L: Record Mutation with Vector Clock {edge_node: 1}
-    Note over L: Status: PENDING_PUSH
-
-    Note over E,S: Network Restored (Online)
-    E->>S: POST /api/sync/trigger (Send Pending Mutations)
-    S-->>E: Acknowledge & Send Upstream Updates
-    Note over E: Conflict Resolution applied (Safety Maximum / Trusted Authority)
-    E->>L: Update Status: SYNCED
+    participant P as Phone (node)
+    participant H as Lifeline API (hub)
+    Note over P: offline - mutations appended to the local log as PENDING_PUSH
+    P->>H: POST /api/sync/hub/push {node_id, entries}
+    H->>H: apply (SAFETY_MAXIMUM / MONOTONIC_APPEND), log with origin
+    H-->>P: accepted_ids
+    P->>H: GET /api/sync/hub/pull?node_id&since=cursor
+    H-->>P: entries from other nodes (+ merged profile re-broadcasts)
+    P->>P: apply, advance cursor
 ```
 
-- **Personal Profile**: Resolved using **Safety Maximum**. If remote and local profiles conflict, allergies and chronic conditions are unioned so no safety restriction is ever lost.
-- **Trusted Protocols**: Resolved using **Trusted Authority**. Signed medical revisions supersede local edits.
-- **Incident Timeline**: Monotonically appended CRDT log.
+* **Personal** - SAFETY_MAXIMUM union of allergies, conditions and medications; contacts unioned by phone; other
+  fields from the most recently edited side. If the hub's merge differs from what a node pushed, the hub
+  re-broadcasts the merged profile so every node converges.
+* **Trusted** - TRUSTED_AUTHORITY: strictly newer versions win; hubs reject protocols pushed by nodes.
+* **Incident** - MONOTONIC_APPEND, de-duplicated by observation id.
+* Push and pull are idempotent (entry ids, cursor), so a lost acknowledgement is harmless.

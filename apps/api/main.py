@@ -1,94 +1,98 @@
 import os
 import sys
+import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
-# Ensure root in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from apps.api.routes import (
-    emergency_router,
-    memory_router,
-    cache_router,
-    sync_router,
-    media_router
-)
+from apps.api.routes import emergency_router, memory_router, cache_router, sync_router, media_router
+from apps.api.security import require_api_key
+from edge.config import get_settings
+from edge.bootstrap import ensure_indexed, shutdown
 from edge.qdrant.client import get_qdrant_manager
 from edge.sync.controller import get_sync_controller
-from scripts.seed_data import seed_database
+from edge.cache.semantic_cache import get_semantic_cache
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("lifeline.api")
+
+SYNC_INTERVAL_SECONDS = 60
+
+
+async def _background_sync():
+    sync = get_sync_controller()
+    while True:
+        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+        if sync.is_online and sync.remote_url:
+            result = await run_in_threadpool(sync.trigger_sync)
+            logger.info("Background sync: %s", result.get("status"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing Lifeline Edge Architecture...")
-    # Verify/seed initial clinical guidelines and patient profile
-    try:
-        qdrant = get_qdrant_manager()
-        stats = qdrant.get_stats()
-        trusted_count = stats.get("TRUSTED", {}).get("points_count", 0)
-        if trusted_count == 0:
-            logger.info("Empty trusted collection detected. Seeding clinical protocols...")
-            seed_database()
-        else:
-            logger.info("Qdrant Edge collections verified with %d trusted protocols.", trusted_count)
-    except Exception as e:
-        logger.error("Lifespan startup verification failed: %s", e)
+    settings = get_settings()
+    logger.info("Starting Lifeline edge node '%s'", settings.node_id)
+    if not settings.api_key:
+        logger.warning("LIFELINE_API_KEY is not set: the API is unauthenticated. Set it before exposing the "
+                       "node beyond localhost.")
+    report = await run_in_threadpool(ensure_indexed)
+    logger.info("Edge memory ready: %s", report)
+    task = asyncio.create_task(_background_sync()) if settings.server_url else None
     yield
-    logger.info("Lifeline Edge shutting down.")
+    if task:
+        task.cancel()
+    shutdown()
+    logger.info("Lifeline edge node stopped.")
+
 
 app = FastAPI(
     title="Lifeline - Risk-Aware Adaptive Emergency Memory API",
-    description="Offline-First Personal Emergency Memory System for Edge Devices.",
-    version="1.0.0",
-    lifespan=lifespan
+    description="Offline-first personal emergency memory on Qdrant Edge.",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-# Enable CORS for edge web console
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=get_settings().cors_origin_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["Content-Type", "X-API-Key", "X-Admin-Key"],
 )
 
-# Register API Routers
-app.include_router(emergency_router, prefix="/api")
-app.include_router(memory_router, prefix="/api")
-app.include_router(cache_router, prefix="/api")
-app.include_router(sync_router, prefix="/api")
-app.include_router(media_router, prefix="/api")
+protected = [Depends(require_api_key)]
+for r in (emergency_router, memory_router, cache_router, sync_router, media_router):
+    app.include_router(r, prefix="/api", dependencies=protected)
+
 
 @app.get("/api/system/health", tags=["System"])
-async def system_health():
+def system_health():
+    """Unauthenticated liveness probe; reveals no patient data."""
     qdrant = get_qdrant_manager()
     sync = get_sync_controller()
-    stats = qdrant.get_stats()
-
     return {
         "status": "HEALTHY",
         "system": "Lifeline Edge System",
         "mode": "OFFLINE_FIRST",
         "is_network_online": sync.is_online,
         "edge_node_id": sync.node_id,
-        "collections": stats,
-        "storage_mode": "embedded_local_qdrant",
-        "storage_ready": os.path.exists("./data/qdrant_storage")
+        "collections": qdrant.get_stats(),
+        "storage_mode": "qdrant_edge_embedded",
+        "dense_model_ready": qdrant.engine.dense_available,
+        "auth_required": bool(get_settings().api_key),
+        "cache_entries": get_semantic_cache().get_stats()["active_cached_entries"],
     }
 
-# Mount built web console at root
+
 dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web", "dist"))
 if os.path.exists(dist_dir):
     app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static_web")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("apps.api.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("apps.api.main:app", host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "8000")))

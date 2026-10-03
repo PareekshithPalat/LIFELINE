@@ -1,98 +1,76 @@
-# Lifeline Edge Runbook & Developer Operations
-
-This document provides operational instructions for running, testing, and demonstrating the Lifeline Edge system.
-
----
+# Lifeline Runbook
 
 ## 1. Prerequisites
 
-- Python 3.11+ (Python 3.12 verified)
-- Node.js 18+ (Node 20 / 24 verified)
-- Git
+| Component | Version used |
+| :--- | :--- |
+| Python | 3.12 |
+| Node.js | 20+ |
+| Flutter (mobile) | 3.47 / Dart 3.13 (Dart ≥ 3.12 is required by `qdrant_edge`) |
+| Android SDK (mobile) | platform 36, NDK 28.2 |
 
----
+## 2. Backend node
 
-## 2. Quickstart Setup
-
-### Step A: Python Virtual Environment & Dependencies
 ```powershell
-# Create virtual environment
 python -m venv .venv
-
-# Activate virtual environment
 .\.venv\Scripts\Activate.ps1
-
-# Install requirements
 pip install -r requirements.txt
+
+cd apps/web; npm install; npm run build; cd ../..
+
+copy .env.example .env      # set LIFELINE_API_KEY (and LIFELINE_ADMIN_KEY if protocols are edited here)
+python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-### Step B: Build Web Console Frontend
+First start downloads the embedding model into `data/models/` and indexes everything (a few seconds). Later starts
+only re-index what changed. `python scripts/seed_data.py` runs the same reconciliation without starting the server.
+
+Runtime state:
+
+| Path | Content |
+| :--- | :--- |
+| `data/runtime/` | profile, incidents, trusted revisions, sync log, media |
+| `data/edge_shards/` | Qdrant Edge shards + `manifest.json` (safe to delete; rebuilt from `data/runtime`) |
+| `data/models/` | embedding model cache |
+
+> The old `data/qdrant_storage/` folder from the previous `qdrant-client` build is no longer used and can be deleted.
+
+## 3. Tests
+
 ```powershell
-cd apps/web
-npm install
-npm run build
-cd ../..
+python -m pytest -q tests          # ~100 tests, about 40 s
 ```
 
-### Step C: Seed Qdrant Edge Memory
-```powershell
-python scripts/seed_data.py
-```
+| File | Covers |
+| :--- | :--- |
+| `test_eval_set.py` | all 60 labelled queries route correctly / abstain; off-domain margin |
+| `test_safety.py` | allergy expansion, condition rules, age rules, other-person detection, full steps |
+| `test_semantic_cache.py` | hits, negation/drug guards, profile/incident/hash invalidation, TTL, LRU |
+| `test_qdrant_edge.py` | chunking, idempotent upserts, persistence, manifest-triggered rebuild |
+| `test_api.py` | endpoints, API key, admin key, version monotonicity, media path traversal |
+| `test_sync.py` | offline buffering, unreachable hub, SAFETY_MAXIMUM, **two-node replication over HTTP** |
 
-### Step D: Launch Lifeline Edge Server
-```powershell
-python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
-```
-Open **`http://localhost:8000`** in your browser to interact with the Lifeline Web Console.
+## 4. Changing protocols or thresholds
 
----
+1. Edit `data/trusted_protocols.json` (bump `version` for changed protocols) or `data/retrieval_config.json`.
+2. Add representative queries to `tests/eval/retrieval_eval.json` and run `pytest tests/test_eval_set.py`.
+3. Rebuild the phone's knowledge pack: `python scripts/build_mobile_pack.py`, then `flutter test` in `apps/mobile`.
 
-## 3. Running Automated Tests
+Running nodes pick up a newer seed version on restart (TRUSTED_AUTHORITY). To push a revision to connected nodes
+without a restart, POST it to `/api/memory/trusted` with `X-Admin-Key`; it replicates through the hub.
 
-Run the complete 18-test pytest suite:
-```powershell
-.\.venv\Scripts\python.exe -m pytest -v tests/
-```
+## 5. Connecting phones
 
-### Test Coverage Breakdown:
-1. `test_embeddings.py`: Validates 384-dimensional dense vectors, BM25 sparse generation, and cosine similarity.
-2. `test_hybrid_retrieval.py`: Tests Reciprocal Rank Fusion (RRF) math and multi-tier retrieval.
-3. `test_semantic_cache.py`: Verifies sub-10ms cache hits, misses, TTL eviction, and state-based invalidations.
-4. `test_validator_and_risk.py`: Tests Intent + Risk routing, allergy conflict detection, and abstain fallbacks.
-5. `test_sync.py`: Verifies offline mutation buffering, vector clocks, and Safety Maximum profile merging.
-6. `test_api.py`: End-to-end integration tests for all FastAPI endpoints using TestClient.
+1. Run the backend reachable from the phones (HTTPS in production; plain HTTP is allowed only in debug builds).
+2. In the app: **More → Sync with a Lifeline hub** → hub URL + `LIFELINE_API_KEY` → *Save & sync now*.
+3. The app also syncs every 2 minutes while the network switch is on. Pending changes show in the top bar.
 
----
+## 6. Troubleshooting
 
-## 4. Running the Demo Scenarios
-
-Execute the standalone clinical demonstration script:
-```powershell
-python scripts/demo_scenario.py
-```
-
-The script exercises:
-- **Scenario 1**: Adult Unresponsive / Cardiac Arrest (Critical Risk -> Sufficient Verdict -> CPR & AED Protocol).
-- **Scenario 2**: Semantic Cache Acceleration (Sub-10ms repeat response).
-- **Scenario 3**: Contraindication Conflict Detection (Aspirin query with recorded patient Aspirin allergy & GI bleeding ulcer -> Escalation & STOP banner).
-- **Scenario 4**: State-Based Cache Invalidation (Demonstrates automatic cache invalidation when patient profile version changes).
-
----
-
-## 5. API Reference Summary
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/api/system/health` | GET | Edge system status, network mode, and Qdrant collection stats |
-| `/api/emergency/query` | POST | Natural-language emergency query pipeline |
-| `/api/emergency/triage` | POST | Rapid START triage calculation |
-| `/api/memory/personal` | GET / PUT | Inspect and update patient emergency vault |
-| `/api/memory/incident` | GET / POST | View and append chronological incident vitals |
-| `/api/memory/trusted` | GET / POST | Browse clinical emergency protocols |
-| `/api/cache/stats` | GET | Inspect cache hit rate and invalidation counts |
-| `/api/cache/clear` | POST | Flush semantic cache |
-| `/api/sync/status` | GET | Vector clock status and pending mutation counts |
-| `/api/sync/trigger` | POST | Execute edge-to-server sync cycle |
-| `/api/sync/toggle-network`| POST | Simulate network disconnect/reconnect |
-| `/api/media/upload` | POST | Upload emergency photo (stored on edge disk + Cloudinary queue) |
-| `/api/media/file/{file}`| GET | Serve local edge media asset |
+| Symptom | Cause / fix |
+| :--- | :--- |
+| Health shows `dense_model_ready: false` | Model not in `data/models` and no network on first start. Start once online or copy the model cache. |
+| Every API call returns 401 | `LIFELINE_API_KEY` is set; send `X-API-Key` (the web console asks for it). |
+| `POST /api/memory/trusted` returns 403 / 409 | Admin key missing, or the version is not newer than the stored one. |
+| Sync status `UNREACHABLE` | Hub down or wrong URL; changes stay buffered and retry automatically. |
+| `ShardLockedEdgeException` | Another process has the shard open (only one process per `QDRANT_STORAGE_PATH`). |

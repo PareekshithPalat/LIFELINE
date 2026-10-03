@@ -6,118 +6,98 @@ import type {
   TriageAssessmentRequest,
   TriageAssessmentResponse,
   SyncStatusData,
-  CacheStatsData
+  CacheStatsData,
+  SyncResult,
+  SystemHealth,
+  MediaUploadResult
 } from "./types";
 
 const API_BASE = "/api";
+const KEY_STORAGE = "lifeline.apiKey";
 
-export async function queryEmergency(query: string, allowCache = true): Promise<GroundedResponse> {
-  const res = await fetch(`${API_BASE}/emergency/query`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, allow_cache: allowCache })
-  });
+export function getApiKey(): string {
+  try {
+    return localStorage.getItem(KEY_STORAGE) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setApiKey(key: string) {
+  try {
+    if (key) localStorage.setItem(KEY_STORAGE, key);
+    else localStorage.removeItem(KEY_STORAGE);
+  } catch {
+    /* storage unavailable: key lasts for this page only */
+  }
+}
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  const key = getApiKey();
+  if (key) headers.set("X-API-Key", key);
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Emergency query failed" }));
-    throw new Error(err.detail || "Query failed");
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.detail || `${res.status} ${res.statusText}`);
   }
   return res.json();
 }
 
-export async function runTriage(data: TriageAssessmentRequest): Promise<TriageAssessmentResponse> {
-  const res = await fetch(`${API_BASE}/emergency/triage`, {
+/** Media URLs are loaded by <img>/<a>, which cannot send headers. */
+export function mediaUrl(localUrl: string): string {
+  const key = getApiKey();
+  return key ? `${localUrl}?api_key=${encodeURIComponent(key)}` : localUrl;
+}
+
+export const queryEmergency = (query: string, incidentId: string, allowCache = true, ageCategory?: string) =>
+  request<GroundedResponse>("/emergency/query", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
+    body: JSON.stringify({ query, incident_id: incidentId, allow_cache: allowCache, age_category: ageCategory || null })
   });
-  if (!res.ok) throw new Error("Triage request failed");
-  return res.json();
-}
 
-export async function getPersonalProfile(): Promise<PersonalProfile> {
-  const res = await fetch(`${API_BASE}/memory/personal`);
-  if (!res.ok) throw new Error("Failed to load personal profile");
-  return res.json();
-}
+export const runTriage = (data: TriageAssessmentRequest) =>
+  request<TriageAssessmentResponse>("/emergency/triage", { method: "POST", body: JSON.stringify(data) });
 
-export async function updatePersonalProfile(profile: PersonalProfile): Promise<PersonalProfile> {
-  const res = await fetch(`${API_BASE}/memory/personal`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(profile)
-  });
-  if (!res.ok) throw new Error("Failed to update profile");
-  return res.json();
-}
+export const getPersonalProfile = () => request<PersonalProfile>("/memory/personal");
 
-export async function getIncidentObservations(): Promise<IncidentObservation[]> {
-  const res = await fetch(`${API_BASE}/memory/incident`);
-  if (!res.ok) throw new Error("Failed to load incident timeline");
-  return res.json();
-}
+export const updatePersonalProfile = (profile: PersonalProfile) =>
+  request<PersonalProfile>("/memory/personal", { method: "PUT", body: JSON.stringify(profile) });
 
-export async function logIncidentObservation(obs: Partial<IncidentObservation>): Promise<IncidentObservation> {
-  const res = await fetch(`${API_BASE}/memory/incident`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(obs)
-  });
-  if (!res.ok) throw new Error("Failed to log incident");
-  return res.json();
-}
+export const getIncidentObservations = (incidentId?: string) =>
+  request<IncidentObservation[]>(
+    `/memory/incident${incidentId ? `?incident_id=${encodeURIComponent(incidentId)}` : ""}`
+  );
 
-export async function getTrustedProtocols(): Promise<EvidenceItem[]> {
-  const res = await fetch(`${API_BASE}/memory/trusted`);
-  if (!res.ok) throw new Error("Failed to load trusted guidelines");
-  return res.json();
-}
+export const logIncidentObservation = (obs: Partial<IncidentObservation>) =>
+  request<IncidentObservation>("/memory/incident", { method: "POST", body: JSON.stringify(obs) });
 
-export async function getCacheStats(): Promise<CacheStatsData> {
-  const res = await fetch(`${API_BASE}/cache/stats`);
-  if (!res.ok) throw new Error("Failed to load cache stats");
-  return res.json();
-}
+export const getTrustedProtocols = () => request<EvidenceItem[]>("/memory/trusted");
 
-export async function clearCache(): Promise<void> {
-  const res = await fetch(`${API_BASE}/cache/clear`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to clear cache");
-}
+export const getCacheStats = () => request<CacheStatsData>("/cache/stats");
 
-export async function getSyncStatus(): Promise<SyncStatusData> {
-  const res = await fetch(`${API_BASE}/sync/status`);
-  if (!res.ok) throw new Error("Failed to load sync status");
-  return res.json();
-}
+export const clearCache = () => request<{ message: string }>("/cache/clear", { method: "POST" });
 
-export async function triggerSync(): Promise<any> {
-  const res = await fetch(`${API_BASE}/sync/trigger`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to trigger sync");
-  return res.json();
-}
+export const getSyncStatus = () => request<SyncStatusData>("/sync/status");
 
-export async function toggleNetwork(online: boolean): Promise<any> {
-  const res = await fetch(`${API_BASE}/sync/toggle-network`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ online })
-  });
-  if (!res.ok) throw new Error("Failed to toggle network mode");
-  return res.json();
-}
+export const triggerSync = () => request<SyncResult>("/sync/trigger", { method: "POST" });
 
-export async function uploadMedia(file: File): Promise<any> {
+export const toggleNetwork = (online: boolean) =>
+  request<{ is_online: boolean }>("/sync/toggle-network", { method: "POST", body: JSON.stringify({ online }) });
+
+export const uploadMedia = (file: File) => {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE}/media/upload`, {
-    method: "POST",
-    body: formData
-  });
-  if (!res.ok) throw new Error("Failed to upload media");
-  return res.json();
-}
+  return request<MediaUploadResult>("/media/upload", { method: "POST", body: formData });
+};
 
-export async function getSystemHealth(): Promise<any> {
-  const res = await fetch(`${API_BASE}/system/health`);
-  if (!res.ok) throw new Error("Health check failed");
-  return res.json();
-}
+export const getSystemHealth = () => request<SystemHealth>("/system/health");

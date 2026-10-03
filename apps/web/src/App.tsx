@@ -21,7 +21,9 @@ import {
   ChevronUp,
   Sparkles,
   Layers,
-  Save
+  Save,
+  KeyRound,
+  EyeOff
 } from "lucide-react";
 import {
   queryEmergency,
@@ -37,17 +39,30 @@ import {
   triggerSync,
   toggleNetwork,
   uploadMedia,
-  getSystemHealth
+  getSystemHealth,
+  getApiKey,
+  setApiKey,
+  mediaUrl,
+  ApiError
 } from "./api";
 import type {
   GroundedResponse,
   PersonalProfile,
   IncidentObservation,
   EvidenceItem,
+  TriageAssessmentRequest,
   TriageAssessmentResponse,
   SyncStatusData,
-  CacheStatsData
+  CacheStatsData,
+  SystemHealth,
+  MediaUploadResult,
+  AgeCategory
 } from "./types";
+
+/** Backend actions are already numbered ("1. ..."); the UI draws its own badges. */
+const stripNumber = (s: string) => s.replace(/^\d+\.\s+/, "");
+
+type ListField = "allergies" | "chronic_conditions" | "current_medications";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<
@@ -57,23 +72,28 @@ export default function App() {
   // System & Edge Status
   const [syncStatus, setSyncStatus] = useState<SyncStatusData | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStatsData | null>(null);
-  const [systemHealth, setSystemHealth] = useState<any>(null);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [needsKey, setNeedsKey] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(getApiKey());
 
   // Assistant State
   const [queryText, setQueryText] = useState("");
+  const [queryAge, setQueryAge] = useState<"" | AgeCategory>("");
   const [response, setResponse] = useState<GroundedResponse | null>(null);
   const [showCitations, setShowCitations] = useState(true);
 
   // Triage State
-  const [triageInput, setTriageInput] = useState({
+  const [triageInput, setTriageInput] = useState<TriageAssessmentRequest>({
     consciousness: true,
     breathing: true,
     severe_bleeding: false,
     chest_pain: false,
     allergic_swelling: false,
-    age_category: "adult"
+    burns_extent: "none",
+    age_category: "adult",
+    patient_is_profile_owner: true
   });
   const [triageResult, setTriageResult] = useState<TriageAssessmentResponse | null>(null);
 
@@ -81,9 +101,14 @@ export default function App() {
   const [profile, setProfile] = useState<PersonalProfile | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editedProfile, setEditedProfile] = useState<PersonalProfile | null>(null);
-  const [newAllergy, setNewAllergy] = useState("");
+  const [newItem, setNewItem] = useState<Record<ListField, string>>({
+    allergies: "",
+    chronic_conditions: "",
+    current_medications: ""
+  });
 
   // Incident State
+  const [incidentId, setIncidentId] = useState("active_incident");
   const [incidents, setIncidents] = useState<IncidentObservation[]>([]);
   const [newObsSymptoms, setNewObsSymptoms] = useState("");
   const [newObsActions, setNewObsActions] = useState("");
@@ -95,33 +120,44 @@ export default function App() {
   const [guidelineSearch, setGuidelineSearch] = useState("");
 
   // Media State
-  const [mediaUploadStatus, setMediaUploadStatus] = useState<any>(null);
+  const [mediaUploadStatus, setMediaUploadStatus] = useState<MediaUploadResult | null>(null);
+
+  const handleError = (e: unknown, fallback: string) => {
+    if (e instanceof ApiError && e.status === 401) {
+      setNeedsKey(true);
+      showNotice("This Lifeline node requires an API key.");
+    } else {
+      showNotice(e instanceof Error ? e.message : fallback);
+    }
+  };
 
   // Load Initial Edge Data
-  const refreshAll = async () => {
+  const refreshAll = async (incident = incidentId) => {
+    const health = await getSystemHealth().catch(() => null);
+    setSystemHealth(health);
     try {
-      const [sStatus, cStats, sHealth, pProfile, iList, gList] = await Promise.all([
-        getSyncStatus().catch(() => null),
-        getCacheStats().catch(() => null),
-        getSystemHealth().catch(() => null),
-        getPersonalProfile().catch(() => null),
-        getIncidentObservations().catch(() => []),
-        getTrustedProtocols().catch(() => [])
+      const [sStatus, cStats, pProfile, iList, gList] = await Promise.all([
+        getSyncStatus(),
+        getCacheStats(),
+        getPersonalProfile(),
+        getIncidentObservations(incident),
+        getTrustedProtocols()
       ]);
+      setNeedsKey(false);
       setSyncStatus(sStatus);
       setCacheStats(cStats);
-      setSystemHealth(sHealth);
       setProfile(pProfile);
       setEditedProfile(pProfile);
       setIncidents(iList);
       setGuidelines(gList);
     } catch (e) {
-      console.error("Refresh error:", e);
+      handleError(e, "Could not reach the Lifeline node");
     }
   };
 
   useEffect(() => {
     refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleNetworkToggle = async () => {
@@ -129,11 +165,10 @@ export default function App() {
     try {
       const nextOnline = !syncStatus.is_online;
       await toggleNetwork(nextOnline);
-      const updated = await getSyncStatus();
-      setSyncStatus(updated);
+      setSyncStatus(await getSyncStatus());
       showNotice(`Network switched to ${nextOnline ? "ONLINE" : "OFFLINE EDGE MODE"}`);
-    } catch (e: any) {
-      showNotice("Failed to toggle network mode");
+    } catch (e) {
+      handleError(e, "Failed to toggle network mode");
     }
   };
 
@@ -141,11 +176,11 @@ export default function App() {
     try {
       setLoading(true);
       const res = await triggerSync();
-      const updated = await getSyncStatus();
-      setSyncStatus(updated);
-      showNotice(res.message || "Sync processed");
-    } catch (e: any) {
-      showNotice(e.message || "Sync failed");
+      setSyncStatus(await getSyncStatus());
+      showNotice(res.message);
+      if (res.status === "ONLINE_SYNCED" && (res.pulled ?? 0) > 0) await refreshAll();
+    } catch (e) {
+      handleError(e, "Sync failed");
     } finally {
       setLoading(false);
     }
@@ -156,19 +191,21 @@ export default function App() {
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
+  const saveApiKey = async () => {
+    setApiKey(apiKeyInput.trim());
+    await refreshAll();
+  };
+
   // Submit Emergency Query
   const handleQuerySubmit = async (q: string) => {
     if (!q.trim()) return;
     setLoading(true);
     setQueryText(q);
     try {
-      const res = await queryEmergency(q, true);
-      setResponse(res);
-      // Refresh cache stats
-      const cStats = await getCacheStats();
-      setCacheStats(cStats);
-    } catch (e: any) {
-      showNotice(e.message || "Emergency query failed");
+      setResponse(await queryEmergency(q, incidentId, true, queryAge || undefined));
+      setCacheStats(await getCacheStats());
+    } catch (e) {
+      handleError(e, "Emergency query failed");
     } finally {
       setLoading(false);
     }
@@ -178,10 +215,9 @@ export default function App() {
   const handleTriageSubmit = async () => {
     setLoading(true);
     try {
-      const res = await runTriage(triageInput);
-      setTriageResult(res);
-    } catch (e: any) {
-      showNotice("Triage calculation error");
+      setTriageResult(await runTriage(triageInput));
+    } catch (e) {
+      handleError(e, "Triage calculation error");
     } finally {
       setLoading(false);
     }
@@ -196,34 +232,45 @@ export default function App() {
       setProfile(saved);
       setIsEditingProfile(false);
       await refreshAll();
-      showNotice(`Personal Vault updated (Version ${saved.version}) - Cache invalidated for safety.`);
-    } catch (e: any) {
-      showNotice("Failed to save personal profile");
+      showNotice(`Personal vault saved (version ${saved.version}). Cached answers for the old profile are no longer served.`);
+    } catch (e) {
+      handleError(e, "Failed to save personal profile");
     } finally {
       setLoading(false);
     }
+  };
+
+  const addListItem = (field: ListField) => {
+    const value = newItem[field].trim();
+    if (!editedProfile || !value) return;
+    setEditedProfile({ ...editedProfile, [field]: [...editedProfile[field], value] });
+    setNewItem({ ...newItem, [field]: "" });
+  };
+
+  const removeListItem = (field: ListField, index: number) => {
+    if (!editedProfile) return;
+    setEditedProfile({ ...editedProfile, [field]: editedProfile[field].filter((_, i) => i !== index) });
   };
 
   // Log Incident Observation
   const handleLogObservation = async () => {
     if (!newObsSymptoms && !newObsActions) return;
     setLoading(true);
+    const split = (v: string) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []);
     try {
       await logIncidentObservation({
-        observed_symptoms: newObsSymptoms ? newObsSymptoms.split(",").map((s) => s.trim()) : [],
-        actions_taken: newObsActions ? newObsActions.split(",").map((s) => s.trim()) : [],
-        vital_signs: {
-          pulse: `${newPulse} bpm`,
-          spO2: `${newSpO2}%`
-        },
+        incident_id: incidentId,
+        observed_symptoms: split(newObsSymptoms),
+        actions_taken: split(newObsActions),
+        vital_signs: { pulse: `${newPulse} bpm`, spO2: `${newSpO2}%` },
         severity: "HIGH"
       });
       setNewObsSymptoms("");
       setNewObsActions("");
       await refreshAll();
-      showNotice("Incident observation recorded to edge timeline.");
-    } catch (e: any) {
-      showNotice("Failed to record observation");
+      showNotice("Observation added to the incident timeline.");
+    } catch (e) {
+      handleError(e, "Failed to record observation");
     } finally {
       setLoading(false);
     }
@@ -237,12 +284,13 @@ export default function App() {
     try {
       const res = await uploadMedia(file);
       setMediaUploadStatus(res);
-      showNotice(`Media stored securely on edge: ${res.filename}`);
+      showNotice(`Media stored on this device: ${res.filename}`);
       refreshAll();
-    } catch (err: any) {
-      showNotice("Media upload failed");
+    } catch (err) {
+      handleError(err, "Media upload failed");
     } finally {
       setLoading(false);
+      e.target.value = "";
     }
   };
 
@@ -309,7 +357,9 @@ export default function App() {
             {/* Qdrant Status Badge */}
             <div className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300">
               <Database className="w-3.5 h-3.5 text-blue-400" />
-              <span>Qdrant Edge: Multi-Vector</span>
+              <span>
+                Qdrant Edge{systemHealth ? (systemHealth.dense_model_ready ? " • hybrid" : " • lexical only") : " • unreachable"}
+              </span>
             </div>
 
             {/* Cache Stats */}
@@ -327,6 +377,28 @@ export default function App() {
       {statusMessage && (
         <div className="bg-blue-600 text-white text-sm py-2 px-4 text-center font-medium shadow-md transition-all">
           {statusMessage}
+        </div>
+      )}
+
+      {needsKey && (
+        <div className="bg-amber-950/80 border-b border-amber-800 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-2 text-xs text-amber-200">
+            <KeyRound className="w-4 h-4" />
+            <span className="font-semibold">This node requires an API key.</span>
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              placeholder="X-API-Key"
+              className="bg-slate-950 border border-amber-700 rounded-lg px-3 py-1.5 text-slate-100"
+            />
+            <button
+              onClick={saveApiKey}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-black font-semibold cursor-pointer"
+            >
+              Unlock
+            </button>
+          </div>
         </div>
       )}
 
@@ -410,6 +482,18 @@ export default function App() {
                   />
                 </div>
                 <div className="flex gap-2">
+                  <select
+                    value={queryAge}
+                    onChange={(e) => setQueryAge(e.target.value as "" | AgeCategory)}
+                    title="Patient age group (auto-detected from the question when left on Auto)"
+                    className="bg-slate-800 border border-slate-700 rounded-xl px-3 text-xs text-slate-200"
+                  >
+                    <option value="">Age: auto</option>
+                    <option value="adult">Adult</option>
+                    <option value="adolescent">Adolescent</option>
+                    <option value="child">Child (1-11)</option>
+                    <option value="infant">Infant (&lt;1)</option>
+                  </select>
                   <label className="flex items-center justify-center px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-medium cursor-pointer transition">
                     <Camera className="w-4 h-4 mr-1.5 text-slate-400" />
                     <span>Attach Photo</span>
@@ -441,11 +525,20 @@ export default function App() {
                     ) : (
                       <span className="px-2.5 py-1 rounded-full bg-blue-950/80 text-blue-300 border border-blue-700/60 font-medium flex items-center space-x-1">
                         <Database className="w-3.5 h-3.5" />
-                        <span>Qdrant Edge Hybrid Fusion ({response.latency_ms}ms)</span>
+                        <span>
+                          {response.retrieval_mode === "profile"
+                            ? "Personal vault"
+                            : response.retrieval_mode === "incident"
+                            ? "Incident timeline"
+                            : `Qdrant Edge ${response.retrieval_mode === "lexical_only" ? "keyword" : "hybrid"} search`}{" "}
+                          ({response.latency_ms}ms)
+                        </span>
                       </span>
                     )}
                     <span className="text-slate-500">•</span>
-                    <span>State Validated: {response.state_valid ? "Yes" : "No"}</span>
+                    <span>Confidence: {response.confidence.toFixed(3)}</span>
+                    <span className="text-slate-500">•</span>
+                    <span>Patient: {response.age_category}</span>
                   </div>
                   <span className="text-slate-500 font-mono text-[11px]">{response.edge_timestamp}</span>
                 </div>
@@ -466,7 +559,7 @@ export default function App() {
                       {response.verdict === "CONFLICT" ? (
                         <div className="px-3 py-1 rounded-lg bg-red-600 text-white font-bold text-xs tracking-wider flex items-center space-x-1">
                           <AlertTriangle className="w-4 h-4" />
-                          <span>CONTRAINDICATION CONFLICT</span>
+                          <span>SAFETY CONFLICT - STEPS WITHHELD</span>
                         </div>
                       ) : response.verdict === "INSUFFICIENT" ? (
                         <div className="px-3 py-1 rounded-lg bg-slate-700 text-slate-200 font-bold text-xs tracking-wider">
@@ -475,7 +568,7 @@ export default function App() {
                       ) : (
                         <div className="px-3 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs tracking-wider flex items-center space-x-1">
                           <CheckCircle className="w-4 h-4" />
-                          <span>CLINICALLY VERIFIED</span>
+                          <span>VERIFIED PROTOCOL</span>
                         </div>
                       )}
 
@@ -505,7 +598,7 @@ export default function App() {
                     <div className="mb-5 p-4 rounded-xl bg-red-950/70 border border-red-700 text-red-200">
                       <div className="flex items-center space-x-2 font-bold text-sm mb-2 text-red-300">
                         <AlertTriangle className="w-5 h-5 text-red-400" />
-                        <span>Critical Warnings & Contraindications:</span>
+                        <span>Warnings & Contraindications:</span>
                       </div>
                       <ul className="list-disc list-inside space-y-1.5 text-xs text-red-200">
                         {response.contraindications_and_warnings.map((c, i) => (
@@ -538,10 +631,30 @@ export default function App() {
                             <span className="w-6 h-6 rounded-full bg-emerald-950 border border-emerald-700 text-emerald-400 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                               {i + 1}
                             </span>
-                            <span className="text-xs sm:text-sm text-slate-200 leading-snug">{act}</span>
+                            <span className="text-xs sm:text-sm text-slate-200 leading-snug">{stripNumber(act)}</span>
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {response.withheld_actions.length > 0 && (
+                    <div className="mt-4 p-3 rounded-xl bg-slate-950/70 border border-red-900/70">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-red-400 mb-2 flex items-center space-x-1.5">
+                        <EyeOff className="w-4 h-4" />
+                        <span>Withheld for this patient - do not do these</span>
+                      </h4>
+                      <ul className="space-y-1.5 text-xs text-slate-400 line-through decoration-red-700/70">
+                        {response.withheld_actions.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {response.related_protocols.length > 0 && (
+                    <div className="mt-4 text-xs text-slate-400">
+                      Also closely related: {response.related_protocols.join(" • ")}
                     </div>
                   )}
 
@@ -628,7 +741,7 @@ export default function App() {
                 <div>
                   <h3 className="text-lg font-bold text-white">Rapid On-Scene Triage Assessment</h3>
                   <p className="text-xs text-slate-400">
-                    START (Simple Triage and Rapid Treatment) edge clinical algorithm
+                    START-style priorities, adjusted for age and the patient's vault
                   </p>
                 </div>
               </div>
@@ -661,7 +774,7 @@ export default function App() {
                     desc: "Anaphylaxis signs following exposure to food, drug, or insect sting"
                   }
                 ].map((item) => {
-                  const val = (triageInput as any)[item.key];
+                  const val = triageInput[item.key as keyof TriageAssessmentRequest] as boolean;
                   return (
                     <div
                       key={item.key}
@@ -694,6 +807,47 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+                <label className="text-xs text-slate-400">
+                  Patient age group
+                  <select
+                    value={triageInput.age_category}
+                    onChange={(e) => setTriageInput({ ...triageInput, age_category: e.target.value as AgeCategory })}
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                  >
+                    <option value="adult">Adult</option>
+                    <option value="adolescent">Adolescent (12-17)</option>
+                    <option value="child">Child (1-11)</option>
+                    <option value="infant">Infant (under 1)</option>
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">
+                  Burns
+                  <select
+                    value={triageInput.burns_extent}
+                    onChange={(e) =>
+                      setTriageInput({ ...triageInput, burns_extent: e.target.value as "none" | "minor" | "major" })
+                    }
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                  >
+                    <option value="none">None</option>
+                    <option value="minor">Minor (smaller than palm)</option>
+                    <option value="major">Major / face, hands, chemical</option>
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">
+                  Patient
+                  <select
+                    value={triageInput.patient_is_profile_owner ? "owner" : "other"}
+                    onChange={(e) => setTriageInput({ ...triageInput, patient_is_profile_owner: e.target.value === "owner" })}
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                  >
+                    <option value="owner">Profile owner (use vault)</option>
+                    <option value="other">Someone else</option>
+                  </select>
+                </label>
               </div>
 
               <button
@@ -830,12 +984,7 @@ export default function App() {
                         <span>{a}</span>
                         {isEditingProfile && (
                           <button
-                            onClick={() =>
-                              setEditedProfile({
-                                ...editedProfile,
-                                allergies: editedProfile.allergies.filter((_, idx) => idx !== i)
-                              })
-                            }
+                            onClick={() => removeListItem("allergies", i)}
                             className="text-red-400 hover:text-white cursor-pointer"
                           >
                             ×
@@ -849,22 +998,14 @@ export default function App() {
                     <div className="mt-3 flex gap-2">
                       <input
                         type="text"
-                        value={newAllergy}
-                        onChange={(e) => setNewAllergy(e.target.value)}
+                        value={newItem.allergies}
+                        onChange={(e) => setNewItem({ ...newItem, allergies: e.target.value })}
                         placeholder="Add allergy (e.g. Latex)..."
                         className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100"
                       />
                       <button
                         type="button"
-                        onClick={() => {
-                          if (newAllergy.trim()) {
-                            setEditedProfile({
-                              ...editedProfile,
-                              allergies: [...editedProfile.allergies, newAllergy.trim()]
-                            });
-                            setNewAllergy("");
-                          }
-                        }}
+                        onClick={() => addListItem("allergies")}
                         className="px-3 py-1.5 bg-red-600 rounded-lg text-xs font-semibold text-white hover:bg-red-500 cursor-pointer"
                       >
                         Add
@@ -882,10 +1023,36 @@ export default function App() {
                     {(isEditingProfile ? editedProfile.chronic_conditions : profile.chronic_conditions).map((c, i) => (
                       <div key={i} className="text-xs text-slate-300 flex items-center space-x-2">
                         <span className="text-amber-400">•</span>
-                        <span>{c}</span>
+                        <span className="flex-1">{c}</span>
+                        {isEditingProfile && (
+                          <button
+                            onClick={() => removeListItem("chronic_conditions", i)}
+                            className="text-slate-500 hover:text-white cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
+                  {isEditingProfile && (
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        type="text"
+                        value={newItem.chronic_conditions}
+                        onChange={(e) => setNewItem({ ...newItem, chronic_conditions: e.target.value })}
+                        placeholder="Add condition (e.g. Epilepsy)..."
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addListItem("chronic_conditions")}
+                        className="px-3 py-1.5 bg-slate-700 rounded-lg text-xs font-semibold text-white hover:bg-slate-600 cursor-pointer"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Current Medications */}
@@ -894,13 +1061,39 @@ export default function App() {
                     Active Medications & Inhalers
                   </span>
                   <div className="space-y-1.5">
-                    {(isEditingProfile ? editedProfile.current_medications : profile.current_medications).map((m, i) => (
+                    {(isEditingProfile ? editedProfile.current_medications : profile.current_medications).map((c, i) => (
                       <div key={i} className="text-xs text-slate-300 flex items-center space-x-2">
                         <span className="text-blue-400">•</span>
-                        <span>{m}</span>
+                        <span className="flex-1">{c}</span>
+                        {isEditingProfile && (
+                          <button
+                            onClick={() => removeListItem("current_medications", i)}
+                            className="text-slate-500 hover:text-white cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
+                  {isEditingProfile && (
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        type="text"
+                        value={newItem.current_medications}
+                        onChange={(e) => setNewItem({ ...newItem, current_medications: e.target.value })}
+                        placeholder="Add medication (e.g. Warfarin 5mg)..."
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addListItem("current_medications")}
+                        className="px-3 py-1.5 bg-slate-700 rounded-lg text-xs font-semibold text-white hover:bg-slate-600 cursor-pointer"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Emergency Contacts */}
@@ -949,6 +1142,24 @@ export default function App() {
               <p className="text-xs text-slate-400 mb-4">
                 Record real-time on-scene observations, vital signs, and medications administered. Automatically indexed in Qdrant Edge.
               </p>
+
+              <div className="mb-4">
+                <label className="text-xs text-slate-400 block mb-1">Incident ID</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={incidentId}
+                    onChange={(e) => setIncidentId(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono"
+                  />
+                  <button
+                    onClick={() => refreshAll(incidentId)}
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:bg-slate-700 cursor-pointer"
+                  >
+                    Load
+                  </button>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
@@ -1009,9 +1220,12 @@ export default function App() {
                 Chronological Incident Stream ({incidents.length} Records)
               </h4>
               {incidents.map((obs, i) => (
-                <div key={i} className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                <div key={obs.id || i} className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="font-bold text-slate-200">Incident Event #{obs.version}</span>
+                    <span className="font-bold text-slate-200">
+                      Observation #{obs.version}
+                      {obs.origin_node && <span className="ml-2 text-slate-500 font-normal">from {obs.origin_node}</span>}
+                    </span>
                     <span className="text-slate-500 font-mono">{new Date(obs.timestamp).toLocaleTimeString()}</span>
                   </div>
                   {obs.vital_signs && Object.keys(obs.vital_signs).length > 0 && (
@@ -1114,14 +1328,18 @@ export default function App() {
                   <div className="space-y-2 text-xs font-mono text-slate-300">
                     <div>Mode: {systemHealth.mode}</div>
                     <div>Storage Engine: {systemHealth.storage_mode}</div>
+                    <div>Dense model: {systemHealth.dense_model_ready ? "ready" : "unavailable (keyword-only mode)"}</div>
                     <div>Edge Node ID: {systemHealth.edge_node_id}</div>
+                    <div>API key required: {systemHealth.auth_required ? "yes" : "no"}</div>
                     <div className="pt-2 border-t border-slate-800">
-                      <div className="font-bold text-slate-400 mb-1">Collections:</div>
-                      {Object.entries(systemHealth.collections || {}).map(([c, info]: any) => (
-                        <div key={c} className="text-slate-400">
-                          • {c}: {info.points_count} vectors
-                        </div>
-                      ))}
+                      <div className="font-bold text-slate-400 mb-1">Shards:</div>
+                      {Object.entries(systemHealth.collections || {}).map(([c, info]) =>
+                        typeof info === "string" ? null : (
+                          <div key={c} className="text-slate-400">
+                            • {c}: {info.documents} documents / {info.points_count} points
+                          </div>
+                        )
+                      )}
                     </div>
                   </div>
                 )}
@@ -1165,11 +1383,51 @@ export default function App() {
                       <span className="text-amber-400 font-bold">{cacheStats.state_invalidations}</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-slate-500">Blocked by safety terms:</span>
+                      <span>{cacheStats.salient_mismatches}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-slate-500">Active Entries:</span>
                       <span>{cacheStats.active_cached_entries}</span>
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Sync & Access */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <h4 className="text-sm font-bold text-white mb-3 flex items-center space-x-2">
+                <RefreshCw className="w-4 h-4 text-blue-400" />
+                <span>Replication & Access</span>
+              </h4>
+              {syncStatus && (
+                <div className="space-y-1 text-xs font-mono text-slate-300 mb-4">
+                  <div>Upstream hub: {syncStatus.remote_server_url || "not configured (standalone node)"}</div>
+                  <div>
+                    Pending changes: {syncStatus.pending_sync_count} / log size {syncStatus.total_mutation_log_count}
+                  </div>
+                  <div>
+                    Last synced: {syncStatus.last_synced_at ? new Date(syncStatus.last_synced_at).toLocaleString() : "never"}
+                  </div>
+                  {syncStatus.last_error && <div className="text-amber-400">Last error: {syncStatus.last_error}</div>}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 items-center text-xs">
+                <KeyRound className="w-4 h-4 text-slate-400" />
+                <input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="API key for this node (stored in this browser)"
+                  className="flex-1 min-w-[12rem] bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100"
+                />
+                <button
+                  onClick={saveApiKey}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 cursor-pointer"
+                >
+                  Save key
+                </button>
               </div>
             </div>
 
@@ -1182,11 +1440,27 @@ export default function App() {
               <p className="text-xs text-slate-400 mb-4">
                 Images of wounds, prescription labels, or medical documents are preserved locally on edge disk and synced to Cloudinary when network connectivity is restored.
               </p>
-              <input type="file" accept="image/*" onChange={handleFileUpload} className="text-xs text-slate-400" />
+              <input
+                type="file"
+                accept="image/*,video/mp4,video/quicktime,audio/*,application/pdf"
+                onChange={handleFileUpload}
+                className="text-xs text-slate-400"
+              />
               {mediaUploadStatus && (
                 <div className="mt-3 p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono">
                   <div>Status: {mediaUploadStatus.status}</div>
-                  <div>Local URL: {mediaUploadStatus.local_url}</div>
+                  <div>
+                    Stored file:{" "}
+                    <a
+                      href={mediaUrl(mediaUploadStatus.local_url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 underline"
+                    >
+                      {mediaUploadStatus.filename}
+                    </a>{" "}
+                    ({Math.round(mediaUploadStatus.size_bytes / 1024)} KB)
+                  </div>
                   {mediaUploadStatus.remote_url && <div>Cloudinary: {mediaUploadStatus.remote_url}</div>}
                 </div>
               )}
@@ -1197,7 +1471,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-slate-900 border-t border-slate-800 px-4 py-3 text-center text-xs text-slate-500">
-        Lifeline v1.0.0 • Risk-Aware Adaptive Emergency Memory for Edge Devices • Embedded Qdrant Engine
+        Lifeline v2.0 • Risk-aware emergency memory on Qdrant Edge • Not a substitute for emergency services
       </footer>
     </div>
   );

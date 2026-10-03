@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   lifeline-edge:
     build:
@@ -11,7 +9,15 @@ services:
       - "8000:8000"
     environment:
       - LIFELINE_NODE_ID=edge_node_alpha
-      - QDRANT_STORAGE_PATH=/app/data/qdrant_storage
+      - LIFELINE_API_KEY=${LIFELINE_API_KEY:?set LIFELINE_API_KEY in .env}
+      - LIFELINE_ADMIN_KEY=${LIFELINE_ADMIN_KEY:-}
+      - LIFELINE_SERVER_URL=${LIFELINE_SERVER_URL:-}
+      - LIFELINE_CORS_ORIGINS=${LIFELINE_CORS_ORIGINS:-http://localhost:8000}
     volumes:
-      - ./data:/app/data
-      - ./media:/app/media
+      # Runtime state and Qdrant Edge shards persist across container rebuilds.
+      - lifeline-runtime:/app/data/runtime
+      - lifeline-shards:/app/data/edge_shards
+
+volumes:
+  lifeline-runtime:
+  lifeline-shards:

@@ -1,88 +1,109 @@
 import os
-import shutil
-import logging
+import re
 import uuid
+import logging
 from typing import Optional, Dict, Any
-from datetime import datetime, timezone
+from edge.config import get_settings
+from models.schemas import utc_now
 
 logger = logging.getLogger("lifeline.media")
 
+ALLOWED_TYPES = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/heic": ".heic",
+    "video/mp4": ".mp4", "video/quicktime": ".mov", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+    "audio/wav": ".wav", "application/pdf": ".pdf",
+}
+_MEDIA_ID = re.compile(r"^[a-f0-9]{32}\.[a-z0-9]{2,5}$")
+
+
+class MediaError(ValueError):
+    pass
+
+
+def safe_display_name(filename: Optional[str]) -> str:
+    """Keeps only a harmless base name for display; it is never used as a path."""
+    base = os.path.basename((filename or "").replace("\\", "/"))
+    base = re.sub(r"[^A-Za-z0-9._ -]", "_", base).strip(" .")
+    return base[:120] or "emergency_media"
+
+
 class MediaManager:
     """
-    Offline-first media management.
-    Saves media directly to local edge device disk.
-    If online and Cloudinary credentials configured, syncs upstream.
+    Offline-first media storage. Files are stored under a server-generated name
+    (uuid + extension derived from the validated content type), so a client-supplied
+    filename can never influence the path. Optional Cloudinary upload when online.
     """
-    def __init__(self, upload_dir: str = "./media/uploads"):
-        self.upload_dir = upload_dir
-        os.makedirs(self.upload_dir, exist_ok=True)
-        self.cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
-        self.api_key = os.getenv("CLOUDINARY_API_KEY")
-        self.api_secret = os.getenv("CLOUDINARY_API_SECRET")
-        self._init_cloudinary()
 
-    def _init_cloudinary(self):
-        if self.cloud_name and self.api_key and self.api_secret:
+    def __init__(self, upload_dir: Optional[str] = None):
+        s = get_settings()
+        self.upload_dir = os.path.abspath(upload_dir or os.path.join(s.runtime_path, "media"))
+        os.makedirs(self.upload_dir, exist_ok=True)
+        self.max_bytes = s.max_upload_mb * 1024 * 1024
+        self.cloud_enabled = bool(s.cloudinary_cloud_name and s.cloudinary_api_key and s.cloudinary_api_secret)
+        if self.cloud_enabled:
             try:
                 import cloudinary
-                cloudinary.config(
-                    cloud_name=self.cloud_name,
-                    api_key=self.api_key,
-                    api_secret=self.api_secret,
-                    secure=True
-                )
-                logger.info("Cloudinary client initialized with cloud: %s", self.cloud_name)
+                cloudinary.config(cloud_name=s.cloudinary_cloud_name, api_key=s.cloudinary_api_key,
+                                  api_secret=s.cloudinary_api_secret, secure=True)
             except Exception as e:
                 logger.warning("Cloudinary configuration failed: %s", e)
+                self.cloud_enabled = False
 
-    def save_media(
-        self,
-        filename: str,
-        file_bytes: bytes,
-        content_type: str = "image/jpeg",
-        is_online: bool = False
-    ) -> Dict[str, Any]:
-        ext = os.path.splitext(filename)[1] or ".jpg"
-        unique_name = f"{uuid.uuid4().hex[:12]}_{filename}"
-        local_path = os.path.join(self.upload_dir, unique_name)
+    def resolve(self, media_id: str) -> Optional[str]:
+        """Returns the on-disk path for a media id, or None for anything that is not one of ours."""
+        if not _MEDIA_ID.match(media_id or ""):
+            return None
+        path = os.path.abspath(os.path.join(self.upload_dir, media_id))
+        if os.path.dirname(path) != self.upload_dir or not os.path.isfile(path):
+            return None
+        return path
 
-        # 1. Save locally to edge disk
+    def save_media(self, filename: Optional[str], file_bytes: bytes, content_type: Optional[str],
+                   is_online: bool = False) -> Dict[str, Any]:
+        if not file_bytes:
+            raise MediaError("Uploaded file is empty.")
+        if len(file_bytes) > self.max_bytes:
+            raise MediaError(f"File exceeds the {self.max_bytes // (1024 * 1024)} MB limit.")
+        ctype = (content_type or "").split(";")[0].strip().lower()
+        if ctype not in ALLOWED_TYPES:
+            raise MediaError(f"Unsupported media type '{ctype}'.")
+
+        media_id = f"{uuid.uuid4().hex}{ALLOWED_TYPES[ctype]}"
+        local_path = os.path.join(self.upload_dir, media_id)
         with open(local_path, "wb") as f:
             f.write(file_bytes)
 
-        local_url = f"/api/media/file/{unique_name}"
-        remote_url: Optional[str] = None
-        status = "SAVED_LOCAL_OFFLINE"
-
-        # 2. If online and Cloudinary configured, sync upstream
-        if is_online and self.cloud_name and self.api_key:
+        remote_url, status = None, "SAVED_LOCAL_OFFLINE"
+        if is_online and self.cloud_enabled:
             try:
                 import cloudinary.uploader
-                upload_res = cloudinary.uploader.upload(
-                    local_path,
-                    folder="lifeline_emergency_media"
-                )
-                remote_url = upload_res.get("secure_url")
-                status = "SYNCED_CLOUDINARY"
-                logger.info("Uploaded media to Cloudinary: %s", remote_url)
+                res = cloudinary.uploader.upload(local_path, folder="lifeline_emergency_media", resource_type="auto")
+                remote_url, status = res.get("secure_url"), "SYNCED_CLOUDINARY"
             except Exception as e:
-                logger.warning("Failed to sync media to Cloudinary: %s. Preserved on edge disk.", e)
+                logger.warning("Cloudinary upload failed (%s); kept on device.", e)
 
         return {
-            "media_id": unique_name,
-            "filename": filename,
-            "local_path": local_path,
-            "local_url": local_url,
+            "media_id": media_id,
+            "filename": safe_display_name(filename),
+            "content_type": ctype,
+            "local_url": f"/api/media/file/{media_id}",
             "remote_url": remote_url,
             "status": status,
             "size_bytes": len(file_bytes),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": utc_now(),
         }
 
+
 _global_media_manager: Optional[MediaManager] = None
+
 
 def get_media_manager() -> MediaManager:
     global _global_media_manager
     if _global_media_manager is None:
         _global_media_manager = MediaManager()
     return _global_media_manager
+
+
+def reset_media_manager():
+    global _global_media_manager
+    _global_media_manager = None

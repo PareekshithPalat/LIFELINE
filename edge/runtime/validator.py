@@ -1,108 +1,71 @@
 import logging
-from typing import List, Dict, Any, Tuple, Optional
-from models.enums import ValidationVerdict, RiskLevel, MemoryTier
-from models.schemas import SourceCitation, PersonalProfile
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional
+from edge.config import get_retrieval_config
+from edge.runtime.safety import ADULT, ADOLESCENT, CHILD, INFANT
 
 logger = logging.getLogger("lifeline.validator")
 
-MIN_CONFIDENCE_THRESHOLD = 0.015
+
+@dataclass
+class GateResult:
+    accepted: bool
+    primary: Optional[Dict[str, Any]] = None
+    related: List[Dict[str, Any]] = field(default_factory=list)
+    confidence: float = 0.0
+    mode: str = "none"
+    reason: str = ""
+
 
 class EvidenceValidator:
     """
-    Validates retrieved evidence against the 3-state emergency paradigm:
-    1. SUFFICIENT: Direct, uncontradicted evidence found.
-    2. CONFLICT: Active contraindication or conflicting medical guidelines detected.
-    3. INSUFFICIENT: Low confidence or out-of-domain query. Refuses to hallucinate.
+    Relevance gate: decides whether a trusted protocol clearly answers the query.
+    Below the calibrated thresholds the system ABSTAINS instead of returning the
+    "least unrelated" protocol. Safety screening of the accepted protocol happens
+    afterwards in the response builder (SUFFICIENT vs CONFLICT).
     """
-    def validate(
-        self,
-        candidates: List[Dict[str, Any]],
-        query: str,
-        risk_level: RiskLevel,
-        personal_profile: Optional[PersonalProfile] = None
-    ) -> Tuple[ValidationVerdict, List[SourceCitation], List[str], Dict[str, Any]]:
+
+    def __init__(self):
+        self.gate = get_retrieval_config()["gate"]
+
+    def _passes(self, cand: Dict[str, Any], second: Optional[Dict[str, Any]]) -> bool:
+        g = self.gate
+        if cand["mode"] == "lexical_only":
+            margin = cand["bm25_score"] - (second["bm25_score"] if second else 0.0)
+            return cand["bm25_score"] >= g["lexical_only_min_bm25"] and margin >= g["lexical_only_min_margin"]
+        return (cand["confidence"] >= g["accept_confidence"]
+                and cand["dense_score"] >= g["min_dense"]
+                and cand["bm25_score"] >= g["min_bm25"])
+
+    def evaluate(self, candidates: List[Dict[str, Any]], age_category: Optional[str] = None) -> GateResult:
         if not candidates:
-            return (
-                ValidationVerdict.INSUFFICIENT,
-                [],
-                ["No relevant emergency medical protocols found in local memory."],
-                {"reason": "empty_candidate_pool"}
-            )
+            return GateResult(False, reason="no_candidates")
 
-        top_cand = candidates[0]
-        top_score = top_cand.get("composite_score", 0.0)
+        accepted = [c for i, c in enumerate(candidates)
+                    if self._passes(c, candidates[i + 1] if i + 1 < len(candidates) else None)]
+        if not accepted:
+            top = candidates[0]
+            logger.info("Gate rejected all candidates (top %s conf=%.3f dense=%.3f bm25=%.2f)",
+                        top["evidence_id"], top["confidence"], top["dense_score"], top["bm25_score"])
+            return GateResult(False, confidence=round(top["confidence"], 4), mode=top["mode"],
+                              reason="below_relevance_threshold")
 
-        # 1. Insufficient Evidence Check
-        if top_score < MIN_CONFIDENCE_THRESHOLD:
-            logger.warning("Top candidate score %.4f below minimum threshold %.4f for query: '%s'",
-                           top_score, MIN_CONFIDENCE_THRESHOLD, query)
-            return (
-                ValidationVerdict.INSUFFICIENT,
-                [],
-                ["Retrieved information does not meet emergency clinical confidence thresholds."],
-                {"reason": "low_confidence_score", "top_score": top_score}
-            )
+        primary = accepted[0]
+        # Age-specific protocol preference (e.g. infant CPR over adult CPR).
+        wanted = {CHILD: "pediatric", INFANT: "pediatric", ADULT: "adult", ADOLESCENT: "adult"}.get(age_category or "")
+        if wanted:
+            for c in accepted:
+                if c["item"].metadata.get("population") == wanted:
+                    primary = c
+                    break
 
-        # 2. Build citations and inspect conflicts
-        citations: List[SourceCitation] = []
-        all_contraindications: List[str] = []
-        has_critical_conflict = False
+        related = [c for c in accepted if c is not primary
+                   and primary["confidence"] - c["confidence"] <= self.gate["related_margin"]]
+        return GateResult(True, primary, related, round(primary["confidence"], 4), primary["mode"], "accepted")
 
-        top_cand_contra = top_cand.get("contraindications_found", [])
-        if top_cand_contra:
-            has_critical_conflict = True
-            all_contraindications.extend(top_cand_contra)
-
-        for cand in candidates[:4]:
-            payload = cand.get("payload", {})
-            tier_str = payload.get("tier", cand.get("tier", MemoryTier.TRUSTED))
-            try:
-                tier = MemoryTier(tier_str)
-            except ValueError:
-                tier = MemoryTier.TRUSTED
-
-            cand_contra = cand.get("contraindications_found", [])
-            # If the user specifically asks if something is safe or contraindication check, any matching candidate triggers conflict
-            if cand_contra and any(k in query.lower() for k in ["can i give", "safe to", "contraindication", "aspirin", "ibuprofen", "allergic"]):
-                has_critical_conflict = True
-                all_contraindications.extend(cand_contra)
-
-            content = payload.get("content", "")
-            snippet = content[:200] + "..." if len(content) > 200 else content
-
-            citations.append(
-                SourceCitation(
-                    evidence_id=cand.get("id", payload.get("evidence_id", "unknown")),
-                    tier=tier,
-                    title=payload.get("title", "Guideline"),
-                    snippet=snippet,
-                    version=payload.get("version", 1),
-                    hash=payload.get("hash", ""),
-                    relevance_score=round(cand.get("composite_score", 0.0), 4),
-                    freshness_timestamp=payload.get("updated_at") or payload.get("created_at"),
-                    contraindications_found=cand_contra
-                )
-            )
-
-        # 3. Conflict / Contraindication Verdict
-        if has_critical_conflict:
-            logger.warning("Active contraindication conflict detected for query: '%s'", query)
-            return (
-                ValidationVerdict.CONFLICT,
-                citations,
-                list(set(all_contraindications)),
-                {"reason": "contraindication_detected", "conflict_count": len(all_contraindications)}
-            )
-
-        # 4. Sufficient Verdict
-        return (
-            ValidationVerdict.SUFFICIENT,
-            citations,
-            all_contraindications,
-            {"status": "validated", "citation_count": len(citations)}
-        )
 
 _global_validator: Optional[EvidenceValidator] = None
+
 
 def get_validator() -> EvidenceValidator:
     global _global_validator

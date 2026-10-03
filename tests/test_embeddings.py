@@ -1,27 +1,20 @@
-import pytest
+import numpy as np
 from edge.embeddings.engine import get_embedding_engine, EmbeddingEngine
 
-def test_dense_embedding_shape():
-    engine = get_embedding_engine()
-    vec = engine.embed_text("Cardiac arrest chest compressions")
-    assert isinstance(vec, list)
-    assert len(vec) == 384
-    # Check normalization
-    import numpy as np
-    norm = np.linalg.norm(vec)
-    assert abs(norm - 1.0) < 0.05
 
-def test_sparse_embedding_generation():
-    engine = get_embedding_engine()
-    indices, values = engine.embed_sparse("Epinephrine EpiPen 0.3mg auto-injector")
-    assert isinstance(indices, list)
-    assert isinstance(values, list)
-    assert len(indices) == len(values)
-    assert len(indices) > 0
+def test_dense_embedding_is_normalised_384d():
+    vec = get_embedding_engine().embed_text("Cardiac arrest chest compressions")
+    assert len(vec) == 384 and abs(np.linalg.norm(vec) - 1.0) < 1e-3
+
+
+def test_bm25_query_and_document_vectors():
+    e = get_embedding_engine()
+    q = e.embed_sparse_query("EpiPen 0.3mg auto-injector")
+    d = e.embed_sparse_document("EpiPen EpiPen 0.3mg auto-injector")
+    assert len(q.indices) > 0 and all(v == 1.0 for v in q.values)
+    assert set(q.indices) <= set(d.indices)
+
 
 def test_cosine_similarity():
-    v1 = [1.0, 0.0, 0.0]
-    v2 = [1.0, 0.0, 0.0]
-    v3 = [0.0, 1.0, 0.0]
-    assert abs(EmbeddingEngine.cosine_similarity(v1, v2) - 1.0) < 1e-4
-    assert abs(EmbeddingEngine.cosine_similarity(v1, v3) - 0.0) < 1e-4
+    assert abs(EmbeddingEngine.cosine_similarity([1, 0, 0], [1, 0, 0]) - 1.0) < 1e-6
+    assert abs(EmbeddingEngine.cosine_similarity([1, 0, 0], [0, 1, 0])) < 1e-6
